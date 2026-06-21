@@ -127,7 +127,7 @@ DB_PASSWORD=
 
 ---
 
-## Hostinger Git deployment (Composer)
+## 🖥️ Hostinger Deployment (Composer)
 
 `composer.json` pins **`config.platform.php` to `8.3.0`** so `composer.lock` stays compatible with **PHP 8.3** (typical on shared hosting). Symfony **8.x** requires **PHP ≥ 8.4**; the lock file therefore resolves **Symfony 7.4** for this project.
 
