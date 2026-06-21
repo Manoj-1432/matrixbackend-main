@@ -35,6 +35,15 @@ class CheckoutController extends Controller
         private readonly DeliveryChargeService $deliveryChargeService,
     ) {}
 
+    /** GET /booking */
+    public function bookingPage(): \Illuminate\Contracts\View\View
+    {
+        $nonce = base64_encode(random_bytes(16));
+        $minDate = Carbon::tomorrow()->toDateString();
+
+        return view('checkout.booking', compact('nonce', 'minDate'));
+    }
+
     /** GET /checkout/success */
     public function successPage(Request $request): \Illuminate\Contracts\View\View|\Illuminate\Http\Response
     {
@@ -84,6 +93,7 @@ class CheckoutController extends Controller
             'tpms_charge' => $tpmsCharge,
             'currency' => $currency,
             'maps_location_enabled' => $mapsLocationEnabled,
+            'min_fitting_date' => Carbon::tomorrow()->toDateString(),
         ]);
     }
 
@@ -288,7 +298,7 @@ class CheckoutController extends Controller
             'customer_comment' => 'nullable|string|max:2000',
 
             'slot_id' => 'required|exists:slots,id',
-            'fitting_date' => 'required|date_format:Y-m-d',
+            'fitting_date' => 'required|date_format:Y-m-d|after:today',
 
             'vehicle_registration' => 'nullable|string|max:50',
             'vehicle_make' => 'nullable|string|max:100',
@@ -390,19 +400,7 @@ class CheckoutController extends Controller
                 ]);
             }
 
-            $now = Carbon::now();
-            if ($fittingDateString === $now->toDateString()) {
-                $slotStart = Carbon::parse($fittingDateString.' '.trim((string) $slot->start_time));
-                if ($slotStart->lessThanOrEqualTo($now)) {
-                    DB::rollBack();
-
-                    return $this->jsonError('This time slot is no longer available for today.', null, 422, [
-                        'slot_id' => ['The selected slot has already started or passed.'],
-                    ]);
-                }
-            }
-
-            $slotTakenByPaidOrder = Order::query()
+$slotTakenByPaidOrder = Order::query()
                 ->forFittingSlotOnDate((int) $slot->id, $fittingDateString)
                 ->blocksFittingSlot()
                 ->lockForUpdate()

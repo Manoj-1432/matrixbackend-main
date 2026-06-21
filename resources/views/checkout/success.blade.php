@@ -183,6 +183,17 @@
       </div>
 
       <a href="{{ $homeUrl }}" class="btn">Return to home</a>
+
+      <div style="margin-top: 1.25rem; padding: 0.9rem 1rem; border-radius: 0.75rem; background: #fff7ed; border: 1px solid #fed7aa; display: flex; align-items: flex-start; gap: 0.65rem;">
+        <svg style="width:1.1rem;height:1.1rem;flex-shrink:0;margin-top:0.1rem;stroke:#ea580c;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <p style="margin:0;font-size:0.8rem;line-height:1.55;color:#9a3412;">
+          <strong style="font-weight:600;">Need same-day fitting?</strong><br>
+          Online bookings require at least 1 day's notice. For same-day fitting, please contact us directly via
+          <a href="tel:{{ config('workatmo.whatsapp_phone') }}" style="color:#ea580c;font-weight:600;text-decoration:none;">call</a>
+          or
+          <a href="https://wa.me/{{ preg_replace('/\D+/', '', config('workatmo.whatsapp_phone')) }}" target="_blank" rel="noopener noreferrer" style="color:#ea580c;font-weight:600;text-decoration:none;">WhatsApp</a>.
+        </p>
+      </div>
     </div>
 
     <p class="credit">Matrix Mobile Tyres</p>
