@@ -374,6 +374,8 @@ HTML
     );
 });
 
+Route::get('/checkout/success', [\App\Http\Controllers\CheckoutController::class, 'successPage']);
+
 // Fallback route for serving storage files if the public symlink is missing (common on shared hosting)
 Route::get('/storage/{path}', function (string $path) {
     $path = storage_path('app/public/' . $path);
