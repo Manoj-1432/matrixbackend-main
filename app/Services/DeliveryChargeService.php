@@ -1,0 +1,259 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\ApiSetting;
+use App\Models\DeliveryCharge;
+use App\Models\Setting;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class DeliveryChargeService
+{
+    private const GEOCODE_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
+
+    private const DISTANCE_MATRIX_URL = 'https://maps.googleapis.com/maps/api/distancematrix/json';
+
+    private const METERS_PER_MILE = 1609.344;
+
+    /**
+     * @return array{
+     *     distance_miles: float,
+     *     delivery_charge: float,
+     *     matched_tier: array{from: float, to: float, charge: float}|null,
+     *     out_of_range: bool
+     * }
+     *
+     * @throws \RuntimeException
+     */
+    public function quoteForCustomerAddress(string $address, string $city, string $postcode): array
+    {
+        $businessAddress = $this->getBusinessAddress();
+        if ($businessAddress === '') {
+            throw new \RuntimeException('Business address is not configured.', 503);
+        }
+
+        $apiKey = $this->resolveGoogleMapsApiKey();
+        $customerAddress = $this->composeAddressLine($address, $city, $postcode);
+
+        $origin = $this->geocodeAddress($businessAddress, $apiKey, 'business');
+        $destination = $this->geocodeAddress($customerAddress, $apiKey, 'customer');
+
+        $distanceMiles = $this->drivingDistanceMiles(
+            $origin['lat'],
+            $origin['lng'],
+            $destination['lat'],
+            $destination['lng'],
+            $apiKey
+        );
+
+        return $this->buildQuoteResult($distanceMiles);
+    }
+
+    public function getBusinessAddress(): string
+    {
+        $value = Setting::query()->where('key', 'address')->value('value');
+
+        return trim((string) ($value ?? ''));
+    }
+
+    /**
+     * @return array{lat: float, lng: float}
+     *
+     * @throws \RuntimeException
+     */
+    public function geocodeAddress(string $address, ?string $apiKey = null, string $context = 'address'): array
+    {
+        $address = trim($address);
+        if ($address === '') {
+            throw new \RuntimeException("Could not geocode the {$context} address.", 422);
+        }
+
+        $apiKey ??= $this->resolveGoogleMapsApiKey();
+
+        $cacheKey = 'delivery_geocode:'.md5(mb_strtolower($address));
+
+        /** @var array{lat: float, lng: float}|null $cached */
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && isset($cached['lat'], $cached['lng'])) {
+            return $cached;
+        }
+
+        try {
+            $response = Http::timeout(15)->get(self::GEOCODE_URL, [
+                'address' => $address,
+                'key' => $apiKey,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Geocode request failed: '.$e->getMessage());
+
+            throw new \RuntimeException('Could not reach location services.', 502);
+        }
+
+        if (! $response->ok()) {
+            throw new \RuntimeException('Location lookup failed.', 502);
+        }
+
+        $payload = $response->json();
+        $status = (string) ($payload['status'] ?? '');
+
+        if ($status === 'ZERO_RESULTS' || empty($payload['results'][0]['geometry']['location'])) {
+            throw new \RuntimeException("Could not locate the {$context} address.", 422);
+        }
+
+        if ($status !== 'OK') {
+            Log::warning('Google Geocoding API returned non-OK status.', ['status' => $status, 'context' => $context]);
+
+            throw new \RuntimeException("Could not resolve the {$context} address.", 422);
+        }
+
+        $location = $payload['results'][0]['geometry']['location'];
+        $coords = [
+            'lat' => (float) ($location['lat'] ?? 0),
+            'lng' => (float) ($location['lng'] ?? 0),
+        ];
+
+        if ($coords['lat'] === 0.0 && $coords['lng'] === 0.0) {
+            throw new \RuntimeException("Could not resolve the {$context} address.", 422);
+        }
+
+        Cache::put($cacheKey, $coords, now()->addDay());
+
+        return $coords;
+    }
+
+    /**
+     * @throws \RuntimeException
+     */
+    public function drivingDistanceMiles(
+        float $originLat,
+        float $originLng,
+        float $destinationLat,
+        float $destinationLng,
+        ?string $apiKey = null
+    ): float {
+        $apiKey ??= $this->resolveGoogleMapsApiKey();
+
+        $origins = "{$originLat},{$originLng}";
+        $destinations = "{$destinationLat},{$destinationLng}";
+
+        try {
+            $response = Http::timeout(15)->get(self::DISTANCE_MATRIX_URL, [
+                'origins' => $origins,
+                'destinations' => $destinations,
+                'units' => 'imperial',
+                'key' => $apiKey,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Distance Matrix request failed: '.$e->getMessage());
+
+            throw new \RuntimeException('Could not reach location services.', 502);
+        }
+
+        if (! $response->ok()) {
+            throw new \RuntimeException('Distance lookup failed.', 502);
+        }
+
+        $payload = $response->json();
+        $status = (string) ($payload['status'] ?? '');
+
+        if ($status !== 'OK') {
+            Log::warning('Google Distance Matrix API returned non-OK status.', ['status' => $status]);
+
+            throw new \RuntimeException('Could not calculate delivery distance.', 422);
+        }
+
+        $element = $payload['rows'][0]['elements'][0] ?? null;
+        $elementStatus = is_array($element) ? (string) ($element['status'] ?? '') : '';
+
+        if ($elementStatus !== 'OK' || ! is_array($element)) {
+            throw new \RuntimeException('Could not calculate delivery distance for this address.', 422);
+        }
+
+        $meters = (float) ($element['distance']['value'] ?? 0);
+        if ($meters <= 0) {
+            throw new \RuntimeException('Could not calculate delivery distance for this address.', 422);
+        }
+
+        return round($meters / self::METERS_PER_MILE, 2);
+    }
+
+    /**
+     * @return array{
+     *     distance_miles: float,
+     *     delivery_charge: float,
+     *     matched_tier: array{from: float, to: float, charge: float}|null,
+     *     out_of_range: bool
+     * }
+     */
+    public function buildQuoteResult(float $distanceMiles): array
+    {
+        $tier = $this->resolveChargeTier($distanceMiles);
+
+        if ($tier === null) {
+            return [
+                'distance_miles' => $distanceMiles,
+                'delivery_charge' => 0.0,
+                'matched_tier' => null,
+                'out_of_range' => true,
+            ];
+        }
+
+        return [
+            'distance_miles' => $distanceMiles,
+            'delivery_charge' => round((float) $tier->charge, 2),
+            'matched_tier' => [
+                'from' => (float) $tier->from_distance,
+                'to' => (float) $tier->to_distance,
+                'charge' => round((float) $tier->charge, 2),
+            ],
+            'out_of_range' => false,
+        ];
+    }
+
+    public function resolveCharge(float $miles): float
+    {
+        $tier = $this->resolveChargeTier($miles);
+
+        return $tier !== null ? round((float) $tier->charge, 2) : 0.0;
+    }
+
+    private function resolveChargeTier(float $miles): ?DeliveryCharge
+    {
+        return DeliveryCharge::query()
+            ->where('status', 'active')
+            ->where('from_distance', '<=', $miles)
+            ->where('to_distance', '>', $miles)
+            ->orderBy('from_distance')
+            ->first();
+    }
+
+    /**
+     * @throws \RuntimeException
+     */
+    private function resolveGoogleMapsApiKey(): string
+    {
+        $setting = ApiSetting::query()->where('key_name', 'google_maps')->first();
+        if (! $setting || ! $setting->is_enabled) {
+            throw new \RuntimeException('Location services are not configured.', 503);
+        }
+
+        $apiKey = trim((string) $setting->value);
+        if ($apiKey === '') {
+            throw new \RuntimeException('Location services are not configured.', 503);
+        }
+
+        return $apiKey;
+    }
+
+    private function composeAddressLine(string $address, string $city, string $postcode): string
+    {
+        return trim(implode(', ', array_filter([
+            trim($address),
+            trim($city),
+            trim($postcode),
+            'United Kingdom',
+        ])));
+    }
+}
