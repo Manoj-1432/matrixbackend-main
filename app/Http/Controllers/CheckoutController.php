@@ -35,6 +35,28 @@ class CheckoutController extends Controller
         private readonly DeliveryChargeService $deliveryChargeService,
     ) {}
 
+    /** GET /checkout/success */
+    public function successPage(Request $request): \Illuminate\Contracts\View\View|\Illuminate\Http\Response
+    {
+        $orderId = (int) $request->query('order_id', 0);
+        $order = $orderId > 0 ? Order::query()->find($orderId) : null;
+
+        if (! $order) {
+            abort(404, 'Order not found.');
+        }
+
+        $currencySymbol = match (strtoupper((string) (Setting::query()->where('key', 'currency')->value('value') ?? 'GBP'))) {
+            'USD' => '$',
+            'EUR' => '€',
+            default => '£',
+        };
+
+        $homeUrl = e(rtrim((string) config('workatmo.frontend_url', 'http://localhost:3000'), '/'));
+        $nonce = base64_encode(random_bytes(16));
+
+        return view('checkout.success', compact('order', 'currencySymbol', 'homeUrl', 'nonce'));
+    }
+
     /** GET /public/checkout-config */
     public function checkoutConfig(): JsonResponse
     {
