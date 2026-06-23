@@ -25,4 +25,4 @@ EXPOSE 8080
 CMD php artisan config:cache || true && \
     php artisan route:cache || true && \
     php artisan migrate --force || true && \
-    php -S 0.0.0.0:${PORT:-8080} -t public public/server.php
+    php -S 0.0.0.0:${PORT:-8080} -t public
