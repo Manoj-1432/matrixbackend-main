@@ -182,8 +182,14 @@ class ApiSettingsController extends Controller
             return $this->jsonError('Validation failed.', null, 422, $validator->errors()->toArray());
         }
 
-        $setting->value = $request->input('value');
-        $setting->save();
+        try {
+            \Illuminate\Support\Facades\DB::table('api_settings')
+                ->where('id', $id)
+                ->update(['value' => $request->input('value'), 'updated_at' => now()]);
+            $setting = ApiSetting::query()->find($id);
+        } catch (\Throwable $e) {
+            return $this->jsonError('Save failed: '.$e->getMessage(), null, 500);
+        }
 
         return $this->jsonSuccess($this->settingResource($setting), 'API key updated successfully.');
     }
