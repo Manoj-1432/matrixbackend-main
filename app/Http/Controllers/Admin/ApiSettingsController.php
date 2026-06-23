@@ -130,17 +130,22 @@ class ApiSettingsController extends Controller
         if (! $actor || ! $actor->hasPermission('api_settings')) {
             return $this->jsonError('You do not have permission to view API settings.', null, 403);
         }
-        // Ensure all 4 rows exist on first load; keep label/description/icon in sync with code
+        // Ensure all rows exist; use raw DB insert to avoid encrypted-cast issues
         foreach (self::KNOWN_APIS as $api) {
-            ApiSetting::firstOrCreate(
-                ['key_name' => $api['key_name']],
-                $api
+            \Illuminate\Support\Facades\DB::table('api_settings')->upsert(
+                [[
+                    'key_name'    => $api['key_name'],
+                    'label'       => $api['label'],
+                    'description' => $api['description'],
+                    'icon_type'   => $api['icon_type'],
+                    'is_enabled'  => $api['is_enabled'],
+                    'value'       => null,
+                    'created_at'  => now(),
+                    'updated_at'  => now(),
+                ]],
+                ['key_name'],
+                ['label', 'description', 'icon_type', 'updated_at']
             );
-            ApiSetting::query()->where('key_name', $api['key_name'])->update([
-                'label' => $api['label'],
-                'description' => $api['description'],
-                'icon_type' => $api['icon_type'],
-            ]);
         }
 
         $keyOrder = array_column(self::KNOWN_APIS, 'key_name');
@@ -261,14 +266,20 @@ class ApiSettingsController extends Controller
      */
     private function settingResource(ApiSetting $setting): array
     {
+        try {
+            $rawValue = $setting->value;
+        } catch (\Throwable) {
+            $rawValue = null;
+        }
+
         return [
             'id' => $setting->id,
             'key_name' => $setting->key_name,
             'label' => $setting->label,
             'description' => $setting->description,
             'icon_type' => $setting->icon_type,
-            'value' => $setting->value ? '••••••••••••••••••••••••'.substr((string) $setting->value, -4) : null,
-            'has_key' => ! empty($setting->value),
+            'value' => $rawValue ? '••••••••••••••••••••••••'.substr((string) $rawValue, -4) : null,
+            'has_key' => ! empty($rawValue),
             'is_enabled' => $setting->is_enabled,
             'updated_at' => $setting->updated_at?->toIso8601String(),
         ];
