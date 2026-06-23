@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
+ARG CACHEBUST=2
 COPY . .
 
 RUN composer install --optimize-autoloader --no-dev --no-interaction --no-scripts
