@@ -22,7 +22,7 @@ RUN composer install --optimize-autoloader --no-dev --no-interaction --no-script
 
 EXPOSE 8080
 
-CMD php artisan config:cache && \
-    php artisan route:cache && \
-    php artisan migrate --force && \
+CMD php artisan config:cache || true && \
+    php artisan route:cache || true && \
+    php artisan migrate --force || true && \
     php -S 0.0.0.0:${PORT:-8080} -t public public/server.php
