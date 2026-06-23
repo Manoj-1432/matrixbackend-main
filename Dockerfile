@@ -15,13 +15,14 @@ RUN apt-get update && apt-get install -y \
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
+ARG CACHEBUST=2
 COPY . .
 
-RUN composer install --optimize-autoloader --no-dev --no-interaction --no-scripts \
-    && php artisan config:cache \
-    && php artisan route:cache \
-    && php artisan view:cache
+RUN composer install --optimize-autoloader --no-dev --no-interaction --no-scripts
 
 EXPOSE 8080
 
-CMD php artisan serve --host=0.0.0.0 --port=${PORT:-8080}
+CMD php artisan config:cache || true && \
+    php artisan route:cache || true && \
+    php artisan migrate --force || true && \
+    php -S 0.0.0.0:${PORT:-8080} -t public public/server.php
