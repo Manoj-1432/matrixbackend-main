@@ -275,7 +275,7 @@ class BrandController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255', 'unique:brands,name'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
-            'is_active' => ['required', 'boolean'],
+            'is_active' => ['sometimes', 'boolean'],
         ]);
 
         if ($validator->fails()) {
@@ -287,7 +287,7 @@ class BrandController extends Controller
         $brand = Brand::query()->create([
             'name' => $data['name'],
             'logo_url' => $data['logo_url'] ?? null,
-            'is_active' => (bool) $data['is_active'],
+            'is_active' => isset($data['is_active']) ? (bool) $data['is_active'] : true,
         ]);
 
         return $this->jsonSuccess($this->resource($brand), 'Brand created successfully.', 201);
@@ -308,7 +308,7 @@ class BrandController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255', Rule::unique('brands', 'name')->ignore($brand->id)],
             'logo_url' => ['nullable', 'string', 'max:2048'],
-            'is_active' => ['required', 'boolean'],
+            'is_active' => ['sometimes', 'boolean'],
         ]);
 
         if ($validator->fails()) {
@@ -318,7 +318,7 @@ class BrandController extends Controller
         $data = $validator->validated();
         $brand->name = $data['name'];
         $brand->logo_url = $data['logo_url'] ?? null;
-        $brand->is_active = (bool) $data['is_active'];
+        $brand->is_active = isset($data['is_active']) ? (bool) $data['is_active'] : $brand->is_active;
         $brand->save();
 
         return $this->jsonSuccess($this->resource($brand), 'Brand updated successfully.');
