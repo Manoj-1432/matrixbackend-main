@@ -266,22 +266,18 @@ class ApiSettingsController extends Controller
      */
     private function settingResource(ApiSetting $setting): array
     {
-        try {
-            $rawValue = $setting->value;
-        } catch (\Throwable) {
-            $rawValue = null;
-        }
+        $val = $setting->value;
 
         return [
-            'id' => $setting->id,
-            'key_name' => $setting->key_name,
-            'label' => $setting->label,
+            'id'          => $setting->id,
+            'key_name'    => $setting->key_name,
+            'label'       => $setting->label,
             'description' => $setting->description,
-            'icon_type' => $setting->icon_type,
-            'value' => $rawValue ? '••••••••••••••••••••••••'.substr((string) $rawValue, -4) : null,
-            'has_key' => ! empty($rawValue),
-            'is_enabled' => $setting->is_enabled,
-            'updated_at' => $setting->updated_at?->toIso8601String(),
+            'icon_type'   => $setting->icon_type,
+            'value'       => $val ? '••••••••••••••••••••••••'.substr((string) $val, -4) : null,
+            'has_key'     => ! empty($val),
+            'is_enabled'  => $setting->is_enabled,
+            'updated_at'  => $setting->updated_at?->toIso8601String(),
         ];
     }
 }

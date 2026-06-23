@@ -18,7 +18,6 @@ class ApiSetting extends Model
     protected function casts(): array
     {
         return [
-            'value'      => 'encrypted',
             'is_enabled' => 'boolean',
         ];
     }
