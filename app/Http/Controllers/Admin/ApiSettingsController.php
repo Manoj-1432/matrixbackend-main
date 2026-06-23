@@ -143,10 +143,12 @@ class ApiSettingsController extends Controller
             ]);
         }
 
+        $keyOrder = array_column(self::KNOWN_APIS, 'key_name');
         $settings = ApiSetting::query()
-            ->whereIn('key_name', array_column(self::KNOWN_APIS, 'key_name'))
-            ->orderByRaw("FIELD(key_name, 'dvla','google_maps','openai','paypal','stripe_test','stripe_live','stripe_test_secret_key','stripe_test_publishable_key','stripe_test_webhook_secret','stripe_live_secret_key','stripe_live_publishable_key','stripe_live_webhook_secret','brand_ai_generate','size_ai_generate','tyre_description_ai_generate')")
-            ->get();
+            ->whereIn('key_name', $keyOrder)
+            ->get()
+            ->sortBy(fn ($s) => array_search($s->key_name, $keyOrder, true))
+            ->values();
 
         return $this->jsonSuccess([
             'settings' => $settings->map(fn (ApiSetting $s) => $this->settingResource($s)),
