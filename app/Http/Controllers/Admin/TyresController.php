@@ -451,9 +451,15 @@ class TyresController extends Controller
             return null;
         }
 
-        $path = $file->store('tyre-images', 'public');
-        // Store as a root-relative path so the frontend can prepend the correct API base URL
-        return '/storage/' . $path;
+        // Save directly into public/tyre-images/ so php -S serves it without symlinks
+        $dir = public_path('tyre-images');
+        if (! is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $filename = uniqid('tyre_', true) . '.' . $file->getClientOriginalExtension();
+        $file->move($dir, $filename);
+
+        return '/tyre-images/' . $filename;
     }
 
     private function downloadSheet(array $rows, string $baseName): StreamedResponse
