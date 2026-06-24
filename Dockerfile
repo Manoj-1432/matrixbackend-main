@@ -25,5 +25,6 @@ EXPOSE 8080
 CMD php artisan config:cache || true && \
     php artisan route:cache || true && \
     php artisan migrate --force || true && \
+    mkdir -p storage/app/public/tyre-images && \
     php artisan storage:link || true && \
     php -S 0.0.0.0:${PORT:-8080} -t public
