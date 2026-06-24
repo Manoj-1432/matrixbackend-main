@@ -153,7 +153,7 @@ class DvlaTyreLookupService
             return [
                 'ok' => false,
                 'http_code' => $httpCode,
-                'error' => 'DVLA request rejected.',
+                'error' => 'DVLA request rejected (HTTP '.$httpCode.'). Check your API key in Admin → API Settings.',
                 'body' => $decoded ?? $response,
             ];
         }
