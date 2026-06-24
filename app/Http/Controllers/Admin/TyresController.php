@@ -452,7 +452,8 @@ class TyresController extends Controller
         }
 
         $path = $file->store('tyre-images', 'public');
-        return Storage::disk('public')->url($path);
+        // Store as a root-relative path so the frontend can prepend the correct API base URL
+        return '/storage/' . $path;
     }
 
     private function downloadSheet(array $rows, string $baseName): StreamedResponse
