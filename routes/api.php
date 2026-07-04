@@ -29,6 +29,7 @@ Route::post('/public/stripe/webhook', [CheckoutController::class, 'stripeWebhook
 Route::get('/public/tyres', [PublicTyreController::class, 'index']);
 Route::get('/public/tyres/{id}', [PublicTyreController::class, 'show']);
 Route::get('/public/tyre-search-options', [PublicTyreSearchOptionsController::class, 'index']);
+Route::get('/public/reviews', [\App\Http\Controllers\PublicReviewsController::class, 'index']);
 
 require __DIR__.'/api/customer.php';
 require __DIR__.'/api/admin.php';
