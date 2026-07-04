@@ -72,9 +72,11 @@ class DeliveryChargeService
             throw new \RuntimeException('Business address is not configured.', 503);
         }
 
-        // Extract postcode from business address (last word/token)
-        $parts = preg_split('/[\s,]+/', $businessAddress);
-        $businessPostcode = strtoupper(trim(end($parts)));
+        // Extract UK postcode from business address using regex
+        if (! preg_match('/([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$/i', $businessAddress, $m)) {
+            throw new \RuntimeException('Could not extract postcode from business address. Please ensure the address ends with a valid UK postcode.', 503);
+        }
+        $businessPostcode = strtoupper(trim($m[1]));
 
         $customerCoords = $this->coordsForPostcode($postcode);
         $businessCoords = $this->coordsForPostcode($businessPostcode);
