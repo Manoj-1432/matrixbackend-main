@@ -197,20 +197,38 @@ class DvlaTyreLookupService
      */
     private function callOpenAiForTyres(string $openAiKey, array $vehicleData): array
     {
-        $vehicleJson = json_encode($vehicleData, JSON_UNESCAPED_SLASHES);
-        $prompt = "Using this DVLA vehicle response JSON: {$vehicleJson}. "
-            .'Use the provided make/year/model-related fields from this response only. '
-            .'Return strict JSON with keys: likely_sizes (array of strings), '
-            .'recommended_pressure_psi_front, recommended_pressure_psi_rear, notes (array of strings). '
-            .'If model is missing in DVLA data, give best likely tyre sizes for the make/year and include clear uncertainty notes.';
+        $make            = strtoupper(trim((string) ($vehicleData['make'] ?? '')));
+        $model           = trim((string) ($vehicleData['model'] ?? ''));
+        $year            = (int) ($vehicleData['yearOfManufacture'] ?? 0);
+        $fuelType        = strtoupper(trim((string) ($vehicleData['fuelType'] ?? '')));
+        $engineCc        = (int) ($vehicleData['engineCapacity'] ?? 0);
+        $colour          = trim((string) ($vehicleData['colour'] ?? ''));
+
+        $vehicleDesc = "{$make}";
+        if ($model !== '') $vehicleDesc .= " {$model}";
+        if ($year > 0)     $vehicleDesc .= ", year {$year}";
+        if ($fuelType !== '') $vehicleDesc .= ", fuel: {$fuelType}";
+        if ($engineCc > 0) $vehicleDesc .= ", engine: {$engineCc}cc";
+
+        $prompt = "Vehicle details from DVLA: {$vehicleDesc}.\n\n"
+            ."Your task:\n"
+            ."1. If the model name is missing or vague, use the make + year + engine capacity (cc) + fuel type to identify the most likely specific model (e.g. Vauxhall 1248cc diesel 2014 → Corsa 1.3 CDTi).\n"
+            ."2. Return the OEM (factory-fitted) tyre sizes for that specific model and year. Check the owner's manual specification, not aftermarket options.\n"
+            ."3. If multiple trim levels exist with different sizes, list only the 1-2 most common sizes.\n"
+            ."4. Format sizes exactly as: 205/55 R16 (width/profile SPACE R rim) — no extra characters.\n\n"
+            ."Return ONLY strict JSON with these keys:\n"
+            ."- likely_sizes: array of strings (OEM sizes, max 2)\n"
+            ."- notes: array of strings (e.g. model identified, any uncertainty)\n"
+            ."- recommended_pressure_psi_front: number\n"
+            ."- recommended_pressure_psi_rear: number";
 
         $payload = [
             'model' => 'gpt-4o-mini',
             'messages' => [
-                ['role' => 'system', 'content' => 'You are an automotive assistant. Reply with valid JSON only.'],
+                ['role' => 'system', 'content' => 'You are an expert automotive tyre specialist with deep knowledge of OEM tyre fitments for UK vehicles. Always reply with valid JSON only, no markdown, no explanation.'],
                 ['role' => 'user', 'content' => $prompt],
             ],
-            'temperature' => 0.2,
+            'temperature' => 0.1,
         ];
 
         $ch = curl_init('https://api.openai.com/v1/chat/completions');
