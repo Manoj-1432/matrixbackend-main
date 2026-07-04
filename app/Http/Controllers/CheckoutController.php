@@ -180,8 +180,6 @@ class CheckoutController extends Controller
     public function deliveryQuote(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'address' => 'required|string|max:1000',
-            'city' => 'required|string|max:100',
             'postcode' => 'required|string|max:20',
         ]);
 
@@ -189,14 +187,10 @@ class CheckoutController extends Controller
             return $this->jsonError('Validation failed.', null, 422, $validator->errors()->toArray());
         }
 
-        $data = $validator->validated();
+        $postcode = $validator->validated()['postcode'];
 
         try {
-            $quote = $this->deliveryChargeService->quoteForCustomerAddress(
-                $data['address'],
-                $data['city'],
-                $data['postcode'],
-            );
+            $quote = $this->deliveryChargeService->quoteForPostcode($postcode);
         } catch (\RuntimeException $e) {
             $status = $e->getCode();
             if (! is_int($status) || $status < 400 || $status > 599) {
