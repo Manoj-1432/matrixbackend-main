@@ -112,9 +112,7 @@ class TyresController extends Controller
         $tyre->status = $this->normalizeStatus($data['status'] ?? true);
 
         if ($request->hasFile('image')) {
-            if ($tyre->image_url && str_contains($tyre->image_url, '/storage/tyre-images/')) {
-                Storage::disk('public')->delete('tyre-images/' . basename($tyre->image_url));
-            }
+            $this->deleteImageIfExists($tyre->image_url);
             $tyre->image_url = $this->uploadImageIfPresent($request);
         }
 
@@ -136,10 +134,7 @@ class TyresController extends Controller
             return $this->jsonError('Tyre not found.', null, 404);
         }
 
-        if ($tyre->image_url && str_contains($tyre->image_url, '/storage/tyre-images/')) {
-            Storage::disk('public')->delete('tyre-images/' . basename($tyre->image_url));
-        }
-
+        $this->deleteImageIfExists($tyre->image_url);
         $tyre->delete();
 
         return $this->jsonSuccess(null, 'Tyre deleted successfully.');
@@ -190,9 +185,7 @@ class TyresController extends Controller
         DB::transaction(function () use ($ids): void {
             $rows = Tyre::query()->whereIn('id', $ids)->get();
             foreach ($rows as $tyre) {
-                if ($tyre->image_url && str_contains($tyre->image_url, '/storage/tyre-images/')) {
-                    Storage::disk('public')->delete('tyre-images/' . basename($tyre->image_url));
-                }
+                $this->deleteImageIfExists($tyre->image_url);
             }
             Tyre::query()->whereIn('id', $ids)->delete();
         });
@@ -444,6 +437,25 @@ class TyresController extends Controller
         return (bool) $status;
     }
 
+    private function deleteImageIfExists(?string $imageUrl): void
+    {
+        if (! $imageUrl) {
+            return;
+        }
+        $r2Base = rtrim(env('R2_PUBLIC_URL', ''), '/');
+        if ($r2Base && str_starts_with($imageUrl, $r2Base)) {
+            $path = ltrim(str_replace($r2Base, '', $imageUrl), '/');
+            Storage::disk('r2')->delete($path);
+            return;
+        }
+        if (str_contains($imageUrl, '/tyre-images/')) {
+            $local = public_path('tyre-images/' . basename($imageUrl));
+            if (file_exists($local)) {
+                unlink($local);
+            }
+        }
+    }
+
     private function uploadImageIfPresent(Request $request): ?string
     {
         $file = $request->file('image');
@@ -451,15 +463,22 @@ class TyresController extends Controller
             return null;
         }
 
-        // Save directly into public/tyre-images/ so php -S serves it without symlinks
+        $filename = 'tyre-images/' . uniqid('tyre_', true) . '.' . $file->getClientOriginalExtension();
+
+        // Use R2 when configured, otherwise fall back to local public folder
+        if (env('R2_ACCESS_KEY_ID') && env('R2_BUCKET')) {
+            Storage::disk('r2')->put($filename, file_get_contents($file->getRealPath()), 'public');
+            $publicUrl = rtrim(env('R2_PUBLIC_URL', ''), '/');
+            return $publicUrl . '/' . $filename;
+        }
+
         $dir = public_path('tyre-images');
         if (! is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
-        $filename = uniqid('tyre_', true) . '.' . $file->getClientOriginalExtension();
-        $file->move($dir, $filename);
+        $file->move($dir, basename($filename));
 
-        return '/tyre-images/' . $filename;
+        return '/tyre-images/' . basename($filename);
     }
 
     private function downloadSheet(array $rows, string $baseName): StreamedResponse
