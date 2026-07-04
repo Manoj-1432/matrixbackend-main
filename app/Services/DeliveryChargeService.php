@@ -17,6 +17,8 @@ class DeliveryChargeService
 
     private const POSTCODES_IO_URL = 'https://api.postcodes.io/postcodes';
 
+    private const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving';
+
     private const METERS_PER_MILE = 1609.344;
 
     /**
@@ -81,7 +83,7 @@ class DeliveryChargeService
         $customerCoords = $this->coordsForPostcode($postcode);
         $businessCoords = $this->coordsForPostcode($businessPostcode);
 
-        $distanceMiles = $this->haversineDistanceMiles(
+        $distanceMiles = $this->drivingDistanceMilesOsrm(
             $businessCoords['lat'], $businessCoords['lng'],
             $customerCoords['lat'], $customerCoords['lng']
         );
@@ -125,6 +127,40 @@ class DeliveryChargeService
         Cache::put($cacheKey, $coords, now()->addDays(30));
 
         return $coords;
+    }
+
+    /**
+     * Get driving distance in miles using OSRM (free, no API key required).
+     * Falls back to Haversine if OSRM is unavailable.
+     */
+    public function drivingDistanceMilesOsrm(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $cacheKey = 'osrm_dist:' . md5("{$lat1},{$lng1},{$lat2},{$lng2}");
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return (float) $cached;
+        }
+
+        try {
+            // OSRM expects lng,lat order
+            $url = self::OSRM_URL . "/{$lng1},{$lat1};{$lng2},{$lat2}?overview=false";
+            $response = Http::timeout(10)->get($url);
+
+            if ($response->ok()) {
+                $payload = $response->json();
+                $meters = $payload['routes'][0]['distance'] ?? null;
+                if ($meters !== null && $meters > 0) {
+                    $miles = round((float) $meters / self::METERS_PER_MILE, 2);
+                    Cache::put($cacheKey, $miles, now()->addDays(7));
+                    return $miles;
+                }
+            }
+        } catch (\Throwable) {
+            // fall through to Haversine
+        }
+
+        // Fallback: straight-line Haversine
+        return $this->haversineDistanceMiles($lat1, $lng1, $lat2, $lng2);
     }
 
     public function haversineDistanceMiles(float $lat1, float $lng1, float $lat2, float $lng2): float
