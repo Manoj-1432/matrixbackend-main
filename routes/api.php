@@ -30,26 +30,14 @@ Route::get('/debug/vdim', function () {
         return ['url' => $url, 'http_code' => $code, 'raw' => json_decode((string)$raw, true) ?? $raw];
     };
 
-    // Step 1: get trim list via by_vehicle/trim
-    $trimResult = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/trim?year=2014&make=Vauxhall&model=Corsa');
-    $results['by_vehicle_trim'] = $trimResult;
+    // Test with Opel (Vauxhall's international name) - VDIM is US-centric
+    $results['opel_trim'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/trim?year=2014&make=Opel&model=Corsa');
 
-    // Pick first trim from response
-    $trim = null;
-    $raw = $trimResult['raw'];
-    if (is_array($raw)) {
-        $list = $raw['data'] ?? $raw['trims'] ?? $raw['results'] ?? $raw;
-        if (is_array($list)) {
-            $first = $list[0] ?? null;
-            $trim = is_string($first) ? $first : ($first['trim'] ?? $first['name'] ?? $first['value'] ?? null);
-        }
-    }
-    $results['selected_trim'] = $trim;
+    // Test with Toyota Camry (known US car) to confirm API works at all
+    $results['toyota_trim'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/trim?year=2023&make=Toyota&model=Camry');
 
-    // Step 2: get tire dimensions with trim (underscore endpoint)
-    if ($trim) {
-        $results['tire_dimensions'] = $vdimGet('https://tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa&trim=' . urlencode($trim));
-    }
+    // Get all makes to see what's available
+    $results['all_makes'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/make');
 
     return response()->json($results);
 });
