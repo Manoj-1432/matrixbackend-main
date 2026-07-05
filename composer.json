@@ -14,8 +14,9 @@
         "laravel/framework": "^13.0",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
-        "league/flysystem-aws-s3-v3": "*",
+        "league/flysystem-aws-s3-v3": "^3.35",
         "phpoffice/phpspreadsheet": "^5.5",
+        "resend/resend-laravel": "^1.4",
         "spatie/simple-excel": "^3.9",
         "stripe/stripe-php": "^20.0"
     },

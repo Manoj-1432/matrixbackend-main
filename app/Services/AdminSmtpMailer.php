@@ -6,6 +6,7 @@ use App\Models\Setting;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
 use Illuminate\Mail\MailManager;
 use Illuminate\Mail\Mailable;
+use Illuminate\Support\Facades\Log;
 
 class AdminSmtpMailer
 {
@@ -35,11 +36,31 @@ class AdminSmtpMailer
             return false;
         }
 
+        // Try Resend API first (works on Railway — no SMTP port blocking)
+        $resendKey = config('services.resend.key') ?: env('RESEND_API_KEY');
+        if ($resendKey) {
+            try {
+                config([
+                    'mail.mailers.resend' => [
+                        'transport' => 'resend',
+                    ],
+                    'services.resend.key' => $resendKey,
+                ]);
+                $this->mailManager->forgetMailers();
+                $this->mailFactory
+                    ->mailer('resend')
+                    ->to($recipientEmail)
+                    ->send($mailable);
+                return true;
+            } catch (\Throwable $e) {
+                Log::warning('Resend delivery failed, falling back to SMTP.', ['error' => $e->getMessage()]);
+            }
+        }
+
+        // Fallback: direct SMTP
         config([
             'mail.mailers.'.self::MAILER_NAME => $smtpConfig['mailer'],
         ]);
-
-        // Make sure mail manager re-reads the runtime mailer configuration.
         $this->mailManager->forgetMailers();
 
         $this->mailFactory
@@ -63,33 +84,43 @@ class AdminSmtpMailer
             ->all();
 
         if (($settings['smtp_enabled'] ?? '0') !== '1') {
-            return null;
+            // Also allow sending via Resend even if SMTP is disabled
+            $resendKey = config('services.resend.key') ?: env('RESEND_API_KEY');
+            if (! $resendKey) {
+                return null;
+            }
+            // Return a minimal config so callers know a from address
+            return [
+                'mailer'     => ['transport' => 'resend'],
+                'from_email' => $settings['smtp_from_email'] ?? config('mail.from.address', 'noreply@matrixmobiletyres.co.uk'),
+                'from_name'  => $settings['smtp_from_name'] ?? config('app.name', 'Matrix Mobile Tyres'),
+            ];
         }
 
-        $host = $settings['smtp_host'] ?? '';
-        $port = $settings['smtp_port'] ?? '';
+        $host      = $settings['smtp_host'] ?? '';
+        $port      = $settings['smtp_port'] ?? '';
         $fromEmail = $settings['smtp_from_email'] ?? '';
 
         if ($host === '' || $port === '' || $fromEmail === '') {
             return null;
         }
 
-        $fromName = $settings['smtp_from_name'] ?? config('app.name', 'Matrix');
+        $fromName   = $settings['smtp_from_name'] ?? config('app.name', 'Matrix');
         $encryption = strtolower($settings['smtp_encryption'] ?? 'none');
         $encryption = in_array($encryption, ['tls', 'ssl'], true) ? $encryption : null;
 
         return [
             'mailer' => [
-                'transport' => 'smtp',
-                'host' => $host,
-                'port' => (int) $port,
-                'username' => $settings['smtp_username'] ?: null,
-                'password' => $settings['smtp_password'] ?: null,
+                'transport'  => 'smtp',
+                'host'       => $host,
+                'port'       => (int) $port,
+                'username'   => $settings['smtp_username'] ?: null,
+                'password'   => $settings['smtp_password'] ?: null,
                 'encryption' => $encryption,
-                'timeout' => null,
+                'timeout'    => null,
             ],
             'from_email' => $fromEmail,
-            'from_name' => $fromName,
+            'from_name'  => $fromName,
         ];
     }
 }
