@@ -85,28 +85,46 @@ class DvlaTyreLookupService
         }
         $vehicle = $this->normalizeVehiclePayload($vehicle);
 
-        $openaiSetting = ApiSetting::query()->where('key_name', 'openai')->first();
-        $tyre = null;
+        $tyre      = null;
         $tyreError = null;
 
-        $hasKey = $openaiSetting && trim((string) $openaiSetting->value) !== '';
+        $make     = ucfirst(strtolower(trim((string) ($vehicle['make'] ?? ''))));
+        $model    = trim((string) ($vehicle['model'] ?? ''));
+        $year     = (int) ($vehicle['yearOfManufacture'] ?? 0);
+        $engineCc = (int) ($vehicle['engineCapacity'] ?? 0);
+        $fuelType = strtolower(trim((string) ($vehicle['fuelType'] ?? '')));
 
-        if ($hasKey && $openaiSetting->is_enabled) {
-            $tyreCall = $this->callOpenAiForTyres($openaiSetting->value, $vehicle);
+        $vdimKey = trim(env('VDIM_TIRE_API_KEY', ''));
+        $openaiSetting = ApiSetting::query()->where('key_name', 'openai')->first();
+        $openaiKey = ($openaiSetting && $openaiSetting->is_enabled)
+            ? trim((string) $openaiSetting->value)
+            : '';
+
+        // Step 1: if model is missing, use OpenAI (cheap call) just to identify the model
+        if ($model === '' && $make !== '' && $year > 0 && $openaiKey !== '') {
+            $model = $this->identifyModelWithOpenAi($openaiKey, $make, $year, $engineCc, $fuelType);
+        }
+
+        // Step 2: try Virtual Dimension tyre fitment API (most accurate)
+        if ($vdimKey !== '' && $make !== '' && $year > 0) {
+            $vdimResult = $this->callVdimApi($vdimKey, $make, $model, $year);
+            if ($vdimResult['ok']) {
+                $tyre = $vdimResult['data'];
+            }
+        }
+
+        // Step 3: fall back to OpenAI for full tyre size lookup if VDIM failed
+        if ($tyre === null && $openaiKey !== '') {
+            $tyreCall = $this->callOpenAiForTyres($openaiKey, $vehicle);
             if ($tyreCall['ok']) {
                 $tyre = $tyreCall['data'];
             } else {
                 $tyreError = $tyreCall;
             }
-        } else {
-            $message = ! $openaiSetting || ! $hasKey
-                ? 'Add a Workatmo Tyre API key under API Settings (Workatmo Tyre Api card), then save.'
-                : 'Turn on the Workatmo Tyre Api toggle in API Settings to enable tyre recommendations.';
+        }
 
-            $tyreError = [
-                'skipped' => true,
-                'error' => $message,
-            ];
+        if ($tyre === null && $tyreError === null) {
+            $tyreError = ['skipped' => true, 'error' => 'No tyre API configured. Add VDIM_TIRE_API_KEY in Railway or enable OpenAI in API Settings.'];
         }
 
         return [
@@ -324,21 +342,6 @@ class DvlaTyreLookupService
         $engineCc = (int) ($vehicleData['engineCapacity'] ?? 0);
         $fuelType = strtolower(trim((string) ($vehicleData['fuelType'] ?? '')));
 
-        // If model is missing, use OpenAI to identify just the model name (not tyre sizes)
-        if ($model === '' && $make !== '' && $year > 0) {
-            $model = $this->identifyModelWithOpenAi($openAiKey, $make, $year, $engineCc, $fuelType);
-        }
-
-        // Try Virtual Dimension tyre fitment API first
-        $vdimKey = env('VDIM_TIRE_API_KEY', '');
-        if ($vdimKey !== '' && $make !== '' && $year > 0) {
-            $vdimResult = $this->callVdimApi($vdimKey, $make, $model, $year);
-            if ($vdimResult['ok']) {
-                return ['ok' => true, 'data' => $vdimResult['data']];
-            }
-        }
-
-        // Fallback: use OpenAI for tyre sizes if VDIM unavailable
         $vehicleDesc = "{$make}";
         if ($model !== '') $vehicleDesc .= " {$model}";
         if ($year > 0)     $vehicleDesc .= ", year {$year}";
