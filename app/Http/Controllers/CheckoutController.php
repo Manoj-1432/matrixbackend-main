@@ -580,7 +580,7 @@ $slotTakenByPaidOrder = Order::query()
         } catch (\Throwable $e) {
             Log::error('Stripe checkout session creation failed: '.$e->getMessage());
 
-            return $this->jsonError('Failed to start Stripe checkout.', null, 500);
+            return $this->jsonError('Failed to start Stripe checkout: '.$e->getMessage(), null, 500);
         }
     }
 
