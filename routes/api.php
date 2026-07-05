@@ -12,35 +12,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/health', [HealthController::class, 'health']);
 
-// Temporary VDIM debug route — remove after confirming API works
-Route::get('/debug/vdim', function () {
-    $key = trim(env('VDIM_TIRE_API_KEY', ''));
-    if ($key === '') {
-        return response()->json(['error' => 'VDIM_TIRE_API_KEY not set in Railway Variables']);
-    }
-    $headers = ["x-api-key: {$key}", 'Accept: application/json'];
-    $results = ['key_set' => substr($key, 0, 8) . '...'];
 
-    $vdimGet = function (string $url) use ($headers, &$results): array {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
-        $raw  = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        return ['url' => $url, 'http_code' => $code, 'raw' => json_decode((string)$raw, true) ?? $raw];
-    };
-
-    // Test with Opel (Vauxhall's international name) - VDIM is US-centric
-    $results['opel_trim'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/trim?year=2014&make=Opel&model=Corsa');
-
-    // Test with Toyota Camry (known US car) to confirm API works at all
-    $results['toyota_trim'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/trim?year=2023&make=Toyota&model=Camry');
-
-    // Get all makes to see what's available
-    $results['all_makes'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/make');
-
-    return response()->json($results);
-});
 Route::post('/vehicle/lookup', [VehicleLookupController::class, 'lookup']);
 
 Route::get('/public/slots', [CheckoutController::class, 'getSlots']);

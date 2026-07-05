@@ -94,27 +94,16 @@ class DvlaTyreLookupService
         $engineCc = (int) ($vehicle['engineCapacity'] ?? 0);
         $fuelType = strtolower(trim((string) ($vehicle['fuelType'] ?? '')));
 
-        $vdimKey = trim(env('VDIM_TIRE_API_KEY', ''));
         $openaiSetting = ApiSetting::query()->where('key_name', 'openai')->first();
         $openaiKey = ($openaiSetting && $openaiSetting->is_enabled)
             ? trim((string) $openaiSetting->value)
             : '';
 
-        // Step 1: if model is missing, use OpenAI (cheap call) just to identify the model
-        if ($model === '' && $make !== '' && $year > 0 && $openaiKey !== '') {
-            $model = $this->identifyModelWithOpenAi($openaiKey, $make, $year, $engineCc, $fuelType);
-        }
+        // Pass engine cc and fuel type into vehicle so the prompt can use them
+        $vehicle['engineCapacity'] = $engineCc;
+        $vehicle['fuelType']       = $fuelType;
 
-        // Step 2: try Virtual Dimension tyre fitment API (most accurate)
-        if ($vdimKey !== '' && $make !== '' && $year > 0) {
-            $vdimResult = $this->callVdimApi($vdimKey, $make, $model, $year);
-            if ($vdimResult['ok']) {
-                $tyre = $vdimResult['data'];
-            }
-        }
-
-        // Step 3: fall back to OpenAI for full tyre size lookup if VDIM failed
-        if ($tyre === null && $openaiKey !== '') {
+        if ($openaiKey !== '') {
             $tyreCall = $this->callOpenAiForTyres($openaiKey, $vehicle);
             if ($tyreCall['ok']) {
                 $tyre = $tyreCall['data'];
@@ -124,7 +113,7 @@ class DvlaTyreLookupService
         }
 
         if ($tyre === null && $tyreError === null) {
-            $tyreError = ['skipped' => true, 'error' => 'No tyre API configured. Add VDIM_TIRE_API_KEY in Railway or enable OpenAI in API Settings.'];
+            $tyreError = ['skipped' => true, 'error' => 'Enable OpenAI in Admin → API Settings to get tyre size recommendations.'];
         }
 
         return [
@@ -210,9 +199,8 @@ class DvlaTyreLookupService
     }
 
     /**
-     * Call the Virtual Dimension tyre fitment API.
-     * Step 1: fetch available trims. Step 2: fetch tyre dimensions for the first trim.
      * @return array{ok: bool, data?: array<string, mixed>, error?: string}
+     * @deprecated VDIM is US-only; kept in case US makes are added in future
      */
     private function callVdimApi(string $apiKey, string $make, string $model, int $year): array
     {
@@ -380,14 +368,16 @@ class DvlaTyreLookupService
 
         $vehicleDesc = "{$make}";
         if ($model !== '') $vehicleDesc .= " {$model}";
-        if ($year > 0)     $vehicleDesc .= ", year {$year}";
-        if ($fuelType !== '') $vehicleDesc .= ", fuel: {$fuelType}";
-        if ($engineCc > 0) $vehicleDesc .= ", engine: {$engineCc}cc";
+        if ($year > 0)     $vehicleDesc .= " ({$year})";
+        if ($engineCc > 0) $vehicleDesc .= ", {$engineCc}cc";
+        if ($fuelType !== '') $vehicleDesc .= " {$fuelType}";
 
-        $prompt = "Vehicle: {$vehicleDesc}.\n"
-            ."Return OEM factory-fitted tyre sizes only (max 2 most common). "
-            ."Format exactly: 205/55 R16 (with space before R).\n"
-            ."Return ONLY JSON: {\"likely_sizes\":[...],\"notes\":[...],\"recommended_pressure_psi_front\":0,\"recommended_pressure_psi_rear\":0}";
+        $prompt = "UK-registered vehicle: {$vehicleDesc}.\n"
+            ."Using the engine size to identify the specific trim/variant, return the OEM factory-fitted tyre sizes for the UK market.\n"
+            ."Return up to 3 most common sizes (different trims may have different sizes).\n"
+            ."Format each size exactly like: 185/65 R15 (width/profile Rrim, with space before R).\n"
+            ."Return ONLY valid JSON, no markdown:\n"
+            ."{\"likely_sizes\":[\"185/65 R15\"],\"notes\":[\"Source: OEM spec\"],\"recommended_pressure_psi_front\":32,\"recommended_pressure_psi_rear\":30}";
 
         $payload = [
             'model' => 'gpt-4o-mini',
