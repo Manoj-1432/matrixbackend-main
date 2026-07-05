@@ -157,14 +157,21 @@ class SettingsController extends Controller
             );
         }
 
+        $booleanKeys = [
+            'vat_enabled', 'platform_fee_enabled', 'tpms_charge_enabled',
+            'maintenance_mode', 'online_payment', 'cash_on_delivery', 'smtp_enabled',
+        ];
+
         $map = [];
         foreach (self::SETTING_KEYS as $key) {
             $value = $request->input($key);
-            Setting::updateOrCreate(
-                ['key' => $key],
-                ['value' => $value !== null ? (string) $value : null]
-            );
-            $map[$key] = $value ?? '';
+            if (in_array($key, $booleanKeys, true)) {
+                $stored = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? '1' : '0';
+            } else {
+                $stored = $value !== null ? (string) $value : null;
+            }
+            Setting::updateOrCreate(['key' => $key], ['value' => $stored]);
+            $map[$key] = $stored ?? '';
         }
 
         return $this->jsonSuccess(
