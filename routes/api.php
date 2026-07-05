@@ -38,21 +38,38 @@ Route::get('/debug/resend-email/{orderId}', function (int $orderId) {
         return response()->json(['error' => 'Order not found']);
     }
     if (! $order->paid_at) {
-        return response()->json(['error' => 'Order not paid yet', 'paid_at' => null]);
+        return response()->json(['error' => 'Order not paid yet']);
     }
     if (! $order->user) {
         return response()->json(['error' => 'Order has no user attached', 'user_id' => $order->user_id]);
     }
-    // Reset sent flag so it will send again
-    $order->update(['confirmation_email_sent_at' => null]);
-    $svc = app(\App\Services\OrderConfirmationEmailService::class);
-    $svc->sendOnceForPaidOrder($order->id);
-    $order->refresh();
+
+    $mailer = app(\App\Services\AdminSmtpMailer::class);
+    $smtpConfig = $mailer->resolveSmtpConfig();
+    if ($smtpConfig === null) {
+        return response()->json(['error' => 'SMTP resolveSmtpConfig() returned null — settings not saved correctly']);
+    }
+
+    try {
+        $mailable = new \App\Mail\CheckoutConfirmationMail(
+            $order,
+            new \Illuminate\Mail\Mailables\Address($smtpConfig['from_email'], $smtpConfig['from_name']),
+            'test-password-123'
+        );
+        $mailer->sendTo($order->user->email, $mailable);
+        $order->update(['confirmation_email_sent_at' => now()]);
+    } catch (\Throwable $e) {
+        return response()->json([
+            'error'   => $e->getMessage(),
+            'class'   => get_class($e),
+            'file'    => $e->getFile().':'.$e->getLine(),
+        ]);
+    }
+
     return response()->json([
-        'order_id' => $order->id,
+        'order_id'   => $order->id,
         'user_email' => $order->user->email,
-        'confirmation_email_sent_at' => $order->confirmation_email_sent_at,
-        'result' => $order->confirmation_email_sent_at ? 'email sent' : 'email NOT sent — check Railway logs',
+        'result'     => 'email sent successfully',
     ]);
 });
 
