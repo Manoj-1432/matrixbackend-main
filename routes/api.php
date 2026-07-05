@@ -12,23 +12,55 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/health', [HealthController::class, 'health']);
 
-// Temporary: test SMTP config and send a test email
+// Temporary debug: show SMTP config and send a test email
 Route::get('/debug/smtp', function () {
     $mailer = app(\App\Services\AdminSmtpMailer::class);
     $config = $mailer->resolveSmtpConfig();
     if ($config === null) {
         $settings = \App\Models\Setting::query()
-            ->whereIn('key', ['smtp_enabled','smtp_host','smtp_port','smtp_from_email'])
+            ->whereIn('key', ['smtp_enabled','smtp_host','smtp_port','smtp_from_email','smtp_username','smtp_encryption'])
             ->pluck('value', 'key');
         return response()->json(['error' => 'SMTP not configured or disabled', 'settings' => $settings]);
     }
-    // Try sending a test email
+    // Send a real test email using raw Mail facade on the runtime mailer
     try {
-        $mailer->sendTo($config['from_email'], new \Illuminate\Mail\Mailable());
+        config(['mail.mailers.admin_smtp_runtime' => $config['mailer']]);
+        app(\Illuminate\Mail\MailManager::class)->forgetMailers();
+        \Illuminate\Support\Facades\Mail::mailer('admin_smtp_runtime')
+            ->raw('SMTP test from Matrix Mobile Tyres. If you received this, email sending is working correctly.', function ($msg) use ($config) {
+                $msg->to($config['from_email'])
+                    ->subject('Matrix Tyres — SMTP Test')
+                    ->from($config['from_email'], $config['from_name']);
+            });
     } catch (\Throwable $e) {
         return response()->json(['smtp_config' => $config['mailer'], 'send_error' => $e->getMessage()]);
     }
-    return response()->json(['smtp_config' => $config['mailer'], 'status' => 'sent']);
+    return response()->json(['smtp_config' => $config['mailer'], 'status' => 'sent — check inbox at '.$config['from_email']]);
+});
+
+// Temporary debug: manually resend confirmation email for a paid order
+Route::get('/debug/resend-email/{orderId}', function (int $orderId) {
+    $order = \App\Models\Order::with(['user','slot'])->find($orderId);
+    if (! $order) {
+        return response()->json(['error' => 'Order not found']);
+    }
+    if (! $order->paid_at) {
+        return response()->json(['error' => 'Order not paid yet', 'paid_at' => null]);
+    }
+    if (! $order->user) {
+        return response()->json(['error' => 'Order has no user attached', 'user_id' => $order->user_id]);
+    }
+    // Reset sent flag so it will send again
+    $order->update(['confirmation_email_sent_at' => null]);
+    $svc = app(\App\Services\OrderConfirmationEmailService::class);
+    $svc->sendOnceForPaidOrder($order->id);
+    $order->refresh();
+    return response()->json([
+        'order_id' => $order->id,
+        'user_email' => $order->user->email,
+        'confirmation_email_sent_at' => $order->confirmation_email_sent_at,
+        'result' => $order->confirmation_email_sent_at ? 'email sent' : 'email NOT sent — check Railway logs',
+    ]);
 });
 
 
