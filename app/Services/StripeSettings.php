@@ -10,9 +10,14 @@ class StripeSettings
 {
     public function enabled(string $mode): bool
     {
-        return (bool) ApiSetting::query()
-            ->where('key_name', $mode === 'live' ? 'stripe_live' : 'stripe_test')
-            ->value('is_enabled');
+        $keyName = $mode === 'live' ? 'stripe_live_secret_key' : 'stripe_test_secret_key';
+
+        $setting = ApiSetting::query()->where('key_name', $keyName)->first();
+        if (! $setting || ! $setting->is_enabled) {
+            return false;
+        }
+
+        return trim((string) $setting->value) !== '';
     }
 
     /**
