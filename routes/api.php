@@ -22,20 +22,13 @@ Route::get('/debug/smtp', function () {
             ->pluck('value', 'key');
         return response()->json(['error' => 'SMTP not configured or disabled', 'settings' => $settings]);
     }
-    // Send a real test email using raw Mail facade on the runtime mailer
-    try {
-        config(['mail.mailers.admin_smtp_runtime' => $config['mailer']]);
-        app(\Illuminate\Mail\MailManager::class)->forgetMailers();
-        \Illuminate\Support\Facades\Mail::mailer('admin_smtp_runtime')
-            ->raw('SMTP test from Matrix Mobile Tyres. If you received this, email sending is working correctly.', function ($msg) use ($config) {
-                $msg->to($config['from_email'])
-                    ->subject('Matrix Tyres — SMTP Test')
-                    ->from($config['from_email'], $config['from_name']);
-            });
-    } catch (\Throwable $e) {
-        return response()->json(['smtp_config' => $config['mailer'], 'send_error' => $e->getMessage()]);
-    }
-    return response()->json(['smtp_config' => $config['mailer'], 'status' => 'sent — check inbox at '.$config['from_email']]);
+    // SMTP config is valid — use /api/debug/resend-email/{orderId} to send a real test
+    return response()->json([
+        'smtp_config' => $config['mailer'],
+        'from_email'  => $config['from_email'],
+        'from_name'   => $config['from_name'],
+        'status'      => 'SMTP configured OK — visit /api/debug/resend-email/{orderId} to send a real order confirmation',
+    ]);
 });
 
 // Temporary debug: manually resend confirmation email for a paid order
