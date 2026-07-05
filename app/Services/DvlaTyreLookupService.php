@@ -211,29 +211,65 @@ class DvlaTyreLookupService
 
     /**
      * Call the Virtual Dimension tyre fitment API.
+     * Step 1: fetch available trims. Step 2: fetch tyre dimensions for the first trim.
      * @return array{ok: bool, data?: array<string, mixed>, error?: string}
      */
     private function callVdimApi(string $apiKey, string $make, string $model, int $year): array
     {
-        $params = http_build_query(array_filter([
+        $headers = ["x-api-key: {$apiKey}", 'Accept: application/json'];
+
+        // Step 1: get available trims
+        $trimParams = http_build_query(array_filter([
             'year'  => $year,
             'make'  => $make,
             'model' => $model ?: null,
         ]));
+        $trimUrl = 'https://tire.vdim.app/api/v1/trims?' . $trimParams;
+        $ch = curl_init($trimUrl);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
+        $trimRaw  = curl_exec($ch);
+        $trimCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
 
-        $url = 'https://tire.vdim.app/api/v1/tire_dimensions?' . $params;
-        $ch  = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER     => ["x-api-key: {$apiKey}", 'Accept: application/json'],
-            CURLOPT_TIMEOUT        => 10,
-        ]);
+        $trim = null;
+        if ($trimRaw !== false && $trimCode === 200) {
+            $trimData = json_decode((string) $trimRaw, true);
+            // Response may be an array of trim strings, or objects with a "trim" key
+            if (is_array($trimData)) {
+                $first = $trimData[0] ?? null;
+                if (is_string($first) && $first !== '') {
+                    $trim = $first;
+                } elseif (is_array($first)) {
+                    $trim = $first['trim'] ?? $first['name'] ?? null;
+                }
+                // unwrap nested data key
+                if ($trim === null && isset($trimData['data'][0])) {
+                    $t = $trimData['data'][0];
+                    $trim = is_string($t) ? $t : ($t['trim'] ?? $t['name'] ?? null);
+                }
+            }
+        }
+
+        if ($trim === null) {
+            return ['ok' => false, 'error' => "VDIM trims endpoint returned no trims (HTTP {$trimCode})"];
+        }
+
+        // Step 2: get tyre dimensions for that trim
+        $dimParams = http_build_query(array_filter([
+            'year'  => $year,
+            'make'  => $make,
+            'model' => $model ?: null,
+            'trim'  => $trim,
+        ]));
+        $dimUrl = 'https://tire.vdim.app/api/v1/tire_dimensions?' . $dimParams;
+        $ch = curl_init($dimUrl);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
         $raw      = curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($raw === false || $httpCode < 200 || $httpCode >= 300) {
-            return ['ok' => false, 'error' => "VDIM API returned HTTP {$httpCode}"];
+            return ['ok' => false, 'error' => "VDIM tire_dimensions returned HTTP {$httpCode}"];
         }
 
         $decoded = json_decode((string) $raw, true);
@@ -248,7 +284,7 @@ class DvlaTyreLookupService
 
         return ['ok' => true, 'data' => [
             'likely_sizes'                   => $sizes,
-            'notes'                          => ['Source: Virtual Dimension tyre fitment database'],
+            'notes'                          => ["Source: Virtual Dimension ({$trim})"],
             'recommended_pressure_psi_front' => 0,
             'recommended_pressure_psi_rear'  => 0,
         ]];

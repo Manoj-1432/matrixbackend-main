@@ -18,24 +18,39 @@ Route::get('/debug/vdim', function () {
     if ($key === '') {
         return response()->json(['error' => 'VDIM_TIRE_API_KEY not set in Railway Variables']);
     }
-    $url = 'https://tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa';
-    $ch  = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER     => ["x-api-key: {$key}", 'Accept: application/json'],
-        CURLOPT_TIMEOUT        => 10,
-    ]);
-    $raw      = curl_exec($ch);
-    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlErr  = curl_error($ch);
+    $headers = ["x-api-key: {$key}", 'Accept: application/json'];
+    $results = [];
+
+    // Step 1: get trims
+    $trimUrl = 'https://tire.vdim.app/api/v1/trims?year=2014&make=Vauxhall&model=Corsa';
+    $ch = curl_init($trimUrl);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
+    $trimRaw  = curl_exec($ch);
+    $trimCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    return response()->json([
-        'url'       => $url,
-        'http_code' => $httpCode,
-        'curl_error'=> $curlErr,
-        'key_set'   => substr($key, 0, 8) . '...',
-        'raw'       => json_decode($raw, true) ?? $raw,
-    ]);
+    $trimDecoded = json_decode((string)$trimRaw, true) ?? $trimRaw;
+    $results['trims'] = ['url' => $trimUrl, 'http_code' => $trimCode, 'raw' => $trimDecoded];
+
+    // Pick first trim
+    $trim = null;
+    if (is_array($trimDecoded)) {
+        $first = $trimDecoded[0] ?? ($trimDecoded['data'][0] ?? null);
+        $trim = is_string($first) ? $first : ($first['trim'] ?? $first['name'] ?? null);
+    }
+    $results['selected_trim'] = $trim;
+
+    if ($trim) {
+        // Step 2: get tire dimensions
+        $dimUrl = 'https://tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa&trim=' . urlencode($trim);
+        $ch = curl_init($dimUrl);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
+        $dimRaw  = curl_exec($ch);
+        $dimCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        $results['dimensions'] = ['url' => $dimUrl, 'http_code' => $dimCode, 'raw' => json_decode((string)$dimRaw, true) ?? $dimRaw];
+    }
+
+    return response()->json(['key_set' => substr($key, 0, 8) . '...'] + $results);
 });
 Route::post('/vehicle/lookup', [VehicleLookupController::class, 'lookup']);
 
