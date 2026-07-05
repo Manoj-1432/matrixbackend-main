@@ -19,38 +19,27 @@ Route::get('/debug/vdim', function () {
         return response()->json(['error' => 'VDIM_TIRE_API_KEY not set in Railway Variables']);
     }
     $headers = ["x-api-key: {$key}", 'Accept: application/json'];
-    $results = [];
+    $results = ['key_set' => substr($key, 0, 8) . '...'];
 
-    // Step 1: get trims
-    $trimUrl = 'https://tire.vdim.app/api/v1/trims?year=2014&make=Vauxhall&model=Corsa';
-    $ch = curl_init($trimUrl);
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
-    $trimRaw  = curl_exec($ch);
-    $trimCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    $trimDecoded = json_decode((string)$trimRaw, true) ?? $trimRaw;
-    $results['trims'] = ['url' => $trimUrl, 'http_code' => $trimCode, 'raw' => $trimDecoded];
-
-    // Pick first trim
-    $trim = null;
-    if (is_array($trimDecoded)) {
-        $first = $trimDecoded[0] ?? ($trimDecoded['data'][0] ?? null);
-        $trim = is_string($first) ? $first : ($first['trim'] ?? $first['name'] ?? null);
-    }
-    $results['selected_trim'] = $trim;
-
-    if ($trim) {
-        // Step 2: get tire dimensions
-        $dimUrl = 'https://tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa&trim=' . urlencode($trim);
-        $ch = curl_init($dimUrl);
+    $vdimGet = function (string $url) use ($headers, &$results): array {
+        $ch = curl_init($url);
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
-        $dimRaw  = curl_exec($ch);
-        $dimCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $raw  = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        $results['dimensions'] = ['url' => $dimUrl, 'http_code' => $dimCode, 'raw' => json_decode((string)$dimRaw, true) ?? $dimRaw];
-    }
+        return ['url' => $url, 'http_code' => $code, 'raw' => json_decode((string)$raw, true) ?? $raw];
+    };
 
-    return response()->json(['key_set' => substr($key, 0, 8) . '...'] + $results);
+    // Test 1: by_vehicle/car
+    $results['by_vehicle_car'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/car?year=2014&make=Vauxhall&model=Corsa');
+
+    // Test 2: tire-dimensions (hyphen) without trim
+    $results['tire_dimensions_no_trim'] = $vdimGet('https://tire.vdim.app/api/v1/tire-dimensions?year=2014&make=Vauxhall&model=Corsa');
+
+    // Test 3: tire-dimensions with a guessed trim
+    $results['tire_dimensions_base_trim'] = $vdimGet('https://tire.vdim.app/api/v1/tire-dimensions?year=2014&make=Vauxhall&model=Corsa&trim=Base');
+
+    return response()->json($results);
 });
 Route::post('/vehicle/lookup', [VehicleLookupController::class, 'lookup']);
 
