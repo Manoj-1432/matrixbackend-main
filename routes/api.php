@@ -30,14 +30,26 @@ Route::get('/debug/vdim', function () {
         return ['url' => $url, 'http_code' => $code, 'raw' => json_decode((string)$raw, true) ?? $raw];
     };
 
-    // Test 1: by_vehicle/car
-    $results['by_vehicle_car'] = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/car?year=2014&make=Vauxhall&model=Corsa');
+    // Step 1: get trim list via by_vehicle/trim
+    $trimResult = $vdimGet('https://tire.vdim.app/api/v1/by_vehicle/trim?year=2014&make=Vauxhall&model=Corsa');
+    $results['by_vehicle_trim'] = $trimResult;
 
-    // Test 2: tire-dimensions (hyphen) without trim
-    $results['tire_dimensions_no_trim'] = $vdimGet('https://tire.vdim.app/api/v1/tire-dimensions?year=2014&make=Vauxhall&model=Corsa');
+    // Pick first trim from response
+    $trim = null;
+    $raw = $trimResult['raw'];
+    if (is_array($raw)) {
+        $list = $raw['data'] ?? $raw['trims'] ?? $raw['results'] ?? $raw;
+        if (is_array($list)) {
+            $first = $list[0] ?? null;
+            $trim = is_string($first) ? $first : ($first['trim'] ?? $first['name'] ?? $first['value'] ?? null);
+        }
+    }
+    $results['selected_trim'] = $trim;
 
-    // Test 3: tire-dimensions with a guessed trim
-    $results['tire_dimensions_base_trim'] = $vdimGet('https://tire.vdim.app/api/v1/tire-dimensions?year=2014&make=Vauxhall&model=Corsa&trim=Base');
+    // Step 2: get tire dimensions with trim (underscore endpoint)
+    if ($trim) {
+        $results['tire_dimensions'] = $vdimGet('https://tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa&trim=' . urlencode($trim));
+    }
 
     return response()->json($results);
 });
