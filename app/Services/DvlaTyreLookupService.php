@@ -221,7 +221,7 @@ class DvlaTyreLookupService
             'model' => $model ?: null,
         ]));
 
-        $url = 'https://account-tire.vdim.app/api/v1/tire_dimensions?' . $params;
+        $url = 'https://tire.vdim.app/api/v1/tire_dimensions?' . $params;
         $ch  = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,

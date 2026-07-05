@@ -18,7 +18,7 @@ Route::get('/debug/vdim', function () {
     if ($key === '') {
         return response()->json(['error' => 'VDIM_TIRE_API_KEY not set in Railway Variables']);
     }
-    $url = 'https://account-tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa';
+    $url = 'https://tire.vdim.app/api/v1/tire_dimensions?year=2014&make=Vauxhall&model=Corsa';
     $ch  = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
