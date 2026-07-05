@@ -341,9 +341,7 @@ class CheckoutController extends Controller
             $currency,
         ] = $this->checkoutConfigValues();
         try {
-            $deliveryQuote = $this->deliveryChargeService->quoteForCustomerAddress(
-                $data['address'],
-                $data['city'],
+            $deliveryQuote = $this->deliveryChargeService->quoteForPostcode(
                 $data['postcode'],
             );
         } catch (\RuntimeException $e) {
