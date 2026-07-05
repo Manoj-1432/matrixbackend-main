@@ -203,7 +203,7 @@ class DvlaTyreLookupService
             'model' => $model ?: null,
         ]));
 
-        $url = 'https://api-tire.vdim.app/api/v1/tire_dimensions?' . $params;
+        $url = 'https://account-tire.vdim.app/api/v1/tire_dimensions?' . $params;
         $ch  = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -240,7 +240,7 @@ class DvlaTyreLookupService
     private function parseSizesFromVdim(array $data): array
     {
         $sizes = [];
-        $items = $data['data'] ?? $data['fitments'] ?? $data['results'] ?? $data;
+        $items = $data['dimensions'] ?? $data['data'] ?? $data['fitments'] ?? $data['results'] ?? $data;
         if (! is_array($items)) return [];
 
         $sizeKeys = ['front_tire', 'rear_tire', 'tire', 'tyre', 'size', 'tire_size'];
