@@ -206,17 +206,28 @@ class CheckoutController extends Controller
     /** GET /public/orders/{order} */
     public function showOrder(Order $order): JsonResponse
     {
+        $order->load('user');
         $isPaid = $this->isOrderPaid($order);
 
         return $this->jsonSuccess([
             'order' => [
-                'id' => $order->id,
-                'amount' => $order->amount,
-                'status' => $order->status,
-                'payment_provider' => $order->payment_provider,
-                'payment_status' => $order->payment_status,
-                'paid_at' => $order->paid_at?->toIso8601String(),
-                'is_paid' => $isPaid,
+                'id'                   => $order->id,
+                'order_ref'            => 'ORD-'.str_pad((string) $order->id, 4, '0', STR_PAD_LEFT),
+                'amount'               => $order->amount,
+                'status'               => $order->status,
+                'payment_provider'     => $order->payment_provider,
+                'payment_status'       => $order->payment_status,
+                'paid_at'              => $order->paid_at?->toIso8601String(),
+                'is_paid'              => $isPaid,
+                'tyre_brand'           => $order->tyre_brand,
+                'tyre_model'           => $order->tyre_model,
+                'tyre_size'            => $order->tyre_size,
+                'tyre_quantity'        => $order->tyre_quantity,
+                'fitting_date'         => $order->fitting_date?->format('Y-m-d'),
+                'vehicle_registration' => $order->vehicle_registration,
+                'customer_name'        => $order->user?->name,
+                'customer_email'       => $order->user?->email,
+                'customer_phone'       => $order->user?->phone,
             ],
         ]);
     }
