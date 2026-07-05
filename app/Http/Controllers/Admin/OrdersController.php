@@ -21,7 +21,7 @@ class OrdersController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Order::with(['user:id,name,email,phone,address', 'slot'])
+        $query = Order::with(['user:id,name,email,phone,address,city,postcode', 'slot'])
             ->orderBy('created_at', 'desc');
 
         // Search by customer name / vehicle registration
