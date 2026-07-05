@@ -69,16 +69,10 @@ class DeliveryChargeService
             throw new \RuntimeException('Postcode is required.', 422);
         }
 
-        $businessAddress = $this->getBusinessAddress();
-        if ($businessAddress === '') {
-            throw new \RuntimeException('Business address is not configured.', 503);
+        $businessPostcode = $this->getBusinessPostcode();
+        if ($businessPostcode === '') {
+            throw new \RuntimeException('Business postcode is not configured. Please set it in Admin → Settings.', 503);
         }
-
-        // Extract UK postcode from business address using regex
-        if (! preg_match('/([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$/i', $businessAddress, $m)) {
-            throw new \RuntimeException('Could not extract postcode from business address. Please ensure the address ends with a valid UK postcode.', 503);
-        }
-        $businessPostcode = strtoupper(trim($m[1]));
 
         $customerCoords = $this->coordsForPostcode($postcode);
         $businessCoords = $this->coordsForPostcode($businessPostcode);
@@ -178,6 +172,23 @@ class DeliveryChargeService
         $value = Setting::query()->where('key', 'address')->value('value');
 
         return trim((string) ($value ?? ''));
+    }
+
+    public function getBusinessPostcode(): string
+    {
+        // Use explicit postcode field first
+        $explicit = Setting::query()->where('key', 'business_postcode')->value('value');
+        if ($explicit !== null && trim($explicit) !== '') {
+            return strtoupper(preg_replace('/\s+/', '', trim($explicit)));
+        }
+
+        // Fall back: extract from address field
+        $address = $this->getBusinessAddress();
+        if (preg_match('/([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$/i', $address, $m)) {
+            return strtoupper(preg_replace('/\s+/', '', $m[1]));
+        }
+
+        return '';
     }
 
     /**
