@@ -408,20 +408,28 @@ class OrdersController extends Controller
             return null;
         }
 
-        // Settings UI stores values like "/storage/logos/foo.png" or full URLs.
+        // Remote URL (R2, CDN) — fetch and convert to base64 data URI for DomPDF
+        if (str_starts_with($logoUrl, 'http://') || str_starts_with($logoUrl, 'https://')) {
+            try {
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->get($logoUrl);
+                if ($response->successful()) {
+                    $mime = explode(';', $response->header('Content-Type') ?: 'image/png')[0];
+                    return 'data:'.$mime.';base64,'.base64_encode($response->body());
+                }
+            } catch (\Throwable) {}
+            return null;
+        }
+
         if (preg_match('~/storage/logos/([^/?#]+)$~', $logoUrl, $m) === 1) {
             $candidate = public_path('storage/logos/' . $m[1]);
-
             return file_exists($candidate) ? $candidate : null;
         }
 
         if (str_starts_with($logoUrl, '/')) {
             $candidate = public_path(ltrim($logoUrl, '/'));
-
             return file_exists($candidate) ? $candidate : null;
         }
 
-        // Remote URLs are not embeddable by DomPDF without enable_remote; fall back to text.
         return null;
     }
 
