@@ -24,8 +24,8 @@ class DashboardController extends Controller
         $totalOrders   = Order::count();
         $totalVehicles = Vehicle::count();
 
-        // Revenue = sum of all completed order amounts
-        $totalRevenue = Order::where('status', 'completed')
+        // Revenue = sum of all paid orders
+        $totalRevenue = Order::whereNotNull('paid_at')
             ->sum('amount');
 
         // ── Order Status Breakdown ─────────────────────────────────────────────
