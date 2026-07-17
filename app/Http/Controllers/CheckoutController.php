@@ -491,6 +491,23 @@ $slotTakenByPaidOrder = Order::query()
 
             DB::commit();
 
+            // Auto-create or update the vehicle record from checkout details
+            if ($vehicleRegistration) {
+                try {
+                    $vehicleData = array_filter([
+                        'make'   => $data['vehicle_make'] ?? null,
+                        'model'  => $data['vehicle_model'] ?? null,
+                        'year'   => isset($data['vehicle_year']) && $data['vehicle_year'] ? (int) $data['vehicle_year'] : null,
+                        'status' => 'active',
+                    ], fn ($v) => $v !== null && $v !== '');
+
+                    \App\Models\Vehicle::updateOrCreate(
+                        ['registration' => $vehicleRegistration],
+                        array_merge($vehicleData, ['user_id' => $user->id])
+                    );
+                } catch (\Throwable) {}
+            }
+
             $this->whatsApp->notifyNewOrder($order);
 
             return $this->jsonSuccess([
