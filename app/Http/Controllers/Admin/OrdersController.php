@@ -92,6 +92,35 @@ class OrdersController extends Controller
     }
 
     /**
+     * Lightweight notifications summary: pending count + recent new orders.
+     */
+    public function notifications(Request $request): JsonResponse
+    {
+        $pendingCount = Order::where('status', 'pending')->count();
+
+        $recent = Order::with(['user:id,name,email'])
+            ->where('created_at', '>=', Carbon::now()->subHours(24))
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get()
+            ->map(fn (Order $o) => [
+                'id'         => $o->id,
+                'order_ref'  => $o->order_ref ?? 'ORD-'.str_pad((string) $o->id, 3, '0', STR_PAD_LEFT),
+                'customer'   => $o->user?->name ?? 'Guest',
+                'amount'     => (float) $o->amount,
+                'status'     => $o->status,
+                'created_at' => $o->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json([
+            'data' => [
+                'pending_count' => $pendingCount,
+                'recent_orders' => $recent,
+            ],
+        ]);
+    }
+
+    /**
      * Show a single order.
      */
     public function show(int $id): JsonResponse

@@ -74,6 +74,7 @@ Route::prefix('admin')->group(function () {
         Route::put('vehicles/{id}', [VehiclesController::class, 'update']);
         Route::delete('vehicles/{id}', [VehiclesController::class, 'destroy']);
 
+        Route::get('orders/notifications', [OrdersController::class, 'notifications']);
         Route::get('orders', [OrdersController::class, 'index']);
         Route::post('orders', [OrdersController::class, 'store']);
         Route::get('orders/{id}', [OrdersController::class, 'show'])->whereNumber('id');
