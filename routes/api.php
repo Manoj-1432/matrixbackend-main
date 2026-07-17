@@ -44,36 +44,18 @@ Route::get('/debug/resend-email/{orderId}', function (int $orderId) {
         return response()->json(['error' => 'Order has no user attached', 'user_id' => $order->user_id]);
     }
 
-    $fromEmail = \App\Models\Setting::query()->where('key', 'smtp_from_email')->value('value') ?: 'info@matrixmobiletyresandautos.com';
-    $fromName  = \App\Models\Setting::query()->where('key', 'smtp_from_name')->value('value') ?: 'Matrix Mobile Tyres';
-    $resendKey = config('services.resend.key') ?: env('RESEND_API_KEY');
+    // Reset sent flag and resend the real confirmation email via Resend
+    $order->update(['confirmation_email_sent_at' => null]);
+    $svc = app(\App\Services\OrderConfirmationEmailService::class);
+    $svc->sendOnceForPaidOrder($order->id);
+    $order->refresh();
 
-    if (! $resendKey) {
-        return response()->json(['error' => 'RESEND_API_KEY not set in Railway Variables']);
-    }
-
-    try {
-        $fe = $fromEmail;
-        $fn = $fromName;
-        \Illuminate\Support\Facades\Mail::mailer('resend')
-            ->to($fe)
-            ->send(new class($fe, $fn) extends \Illuminate\Mail\Mailable {
-                public function __construct(private string $fe, private string $fn) {}
-                public function envelope(): \Illuminate\Mail\Mailables\Envelope {
-                    return new \Illuminate\Mail\Mailables\Envelope(
-                        from: new \Illuminate\Mail\Mailables\Address($this->fe, $this->fn),
-                        subject: 'Matrix Tyres — Resend Test',
-                    );
-                }
-                public function content(): \Illuminate\Mail\Mailables\Content {
-                    return new \Illuminate\Mail\Mailables\Content(htmlString: '<h1>Resend is working!</h1><p>Email sending is configured correctly.</p>');
-                }
-                public function attachments(): array { return []; }
-            });
-        return response()->json(['status' => 'Resend test email sent to '.$fromEmail]);
-    } catch (\Throwable $e) {
-        return response()->json(['resend_error' => $e->getMessage(), 'from_email' => $fromEmail]);
-    }
+    return response()->json([
+        'order_id'   => $order->id,
+        'user_email' => $order->user->email,
+        'result'     => $order->confirmation_email_sent_at ? 'email sent successfully' : 'email NOT sent — check Railway logs',
+        'sent_at'    => $order->confirmation_email_sent_at,
+    ]);
 });
 
 
