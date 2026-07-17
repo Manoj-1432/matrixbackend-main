@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\DeliveryChargeService;
 use App\Services\OrderConfirmationEmailService;
 use App\Services\StripeSettings;
+use App\Services\WhatsAppNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -33,6 +34,7 @@ class CheckoutController extends Controller
     public function __construct(
         private readonly OrderConfirmationEmailService $orderConfirmationEmailService,
         private readonly DeliveryChargeService $deliveryChargeService,
+        private readonly WhatsAppNotificationService $whatsApp,
     ) {}
 
     /** GET /booking */
@@ -481,6 +483,8 @@ $slotTakenByPaidOrder = Order::query()
 
             DB::commit();
 
+            $this->whatsApp->notifyNewOrder($order);
+
             return $this->jsonSuccess([
                 'order' => $order,
                 'summary' => [
@@ -857,6 +861,7 @@ $slotTakenByPaidOrder = Order::query()
             ]));
 
             $this->orderConfirmationEmailService->sendOnceForPaidOrder($locked->id);
+            $this->whatsApp->notifyPaymentConfirmed($locked);
         });
     }
 }
