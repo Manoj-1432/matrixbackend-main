@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\DeliveryChargeService;
 use App\Services\OrderConfirmationEmailService;
 use App\Services\StripeSettings;
+use App\Services\WhatsAppNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -33,6 +34,7 @@ class CheckoutController extends Controller
     public function __construct(
         private readonly OrderConfirmationEmailService $orderConfirmationEmailService,
         private readonly DeliveryChargeService $deliveryChargeService,
+        private readonly WhatsAppNotificationService $whatsApp,
     ) {}
 
     /** GET /booking */
@@ -180,8 +182,6 @@ class CheckoutController extends Controller
     public function deliveryQuote(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'address' => 'required|string|max:1000',
-            'city' => 'required|string|max:100',
             'postcode' => 'required|string|max:20',
         ]);
 
@@ -189,14 +189,10 @@ class CheckoutController extends Controller
             return $this->jsonError('Validation failed.', null, 422, $validator->errors()->toArray());
         }
 
-        $data = $validator->validated();
+        $postcode = $validator->validated()['postcode'];
 
         try {
-            $quote = $this->deliveryChargeService->quoteForCustomerAddress(
-                $data['address'],
-                $data['city'],
-                $data['postcode'],
-            );
+            $quote = $this->deliveryChargeService->quoteForPostcode($postcode);
         } catch (\RuntimeException $e) {
             $status = $e->getCode();
             if (! is_int($status) || $status < 400 || $status > 599) {
@@ -212,17 +208,28 @@ class CheckoutController extends Controller
     /** GET /public/orders/{order} */
     public function showOrder(Order $order): JsonResponse
     {
+        $order->load('user');
         $isPaid = $this->isOrderPaid($order);
 
         return $this->jsonSuccess([
             'order' => [
-                'id' => $order->id,
-                'amount' => $order->amount,
-                'status' => $order->status,
-                'payment_provider' => $order->payment_provider,
-                'payment_status' => $order->payment_status,
-                'paid_at' => $order->paid_at?->toIso8601String(),
-                'is_paid' => $isPaid,
+                'id'                   => $order->id,
+                'order_ref'            => 'ORD-'.str_pad((string) $order->id, 4, '0', STR_PAD_LEFT),
+                'amount'               => $order->amount,
+                'status'               => $order->status,
+                'payment_provider'     => $order->payment_provider,
+                'payment_status'       => $order->payment_status,
+                'paid_at'              => $order->paid_at?->toIso8601String(),
+                'is_paid'              => $isPaid,
+                'tyre_brand'           => $order->tyre_brand,
+                'tyre_model'           => $order->tyre_model,
+                'tyre_size'            => $order->tyre_size,
+                'tyre_quantity'        => $order->tyre_quantity,
+                'fitting_date'         => $order->fitting_date?->format('Y-m-d'),
+                'vehicle_registration' => $order->vehicle_registration,
+                'customer_name'        => $order->user?->name,
+                'customer_email'       => $order->user?->email,
+                'customer_phone'       => $order->user?->phone,
             ],
         ]);
     }
@@ -303,6 +310,7 @@ class CheckoutController extends Controller
             'vehicle_registration' => 'nullable|string|max:50',
             'vehicle_make' => 'nullable|string|max:100',
             'vehicle_model' => 'nullable|string|max:100',
+            'vehicle_year' => 'nullable|integer|min:1990|max:'.((int) date('Y') + 1),
 
             'tyre_brand' => 'required|string',
             'tyre_model' => 'required|string',
@@ -347,9 +355,7 @@ class CheckoutController extends Controller
             $currency,
         ] = $this->checkoutConfigValues();
         try {
-            $deliveryQuote = $this->deliveryChargeService->quoteForCustomerAddress(
-                $data['address'],
-                $data['city'],
+            $deliveryQuote = $this->deliveryChargeService->quoteForPostcode(
                 $data['postcode'],
             );
         } catch (\RuntimeException $e) {
@@ -476,7 +482,33 @@ $slotTakenByPaidOrder = Order::query()
                 'notes' => "{$commentBlock}{$fittingAddressBlock}\nSubtotal: {$subtotal}\nPlatform Fee Enabled: ".($platformFeeEnabled ? '1' : '0')."\nPlatform Fee Amount: {$appliedPlatformFee}\nTPMS Charge Enabled: ".($tpmsChargeEnabled ? '1' : '0')."\nCustomer TPMS add-on: ".($includeTpms ? 'yes' : 'no')."\nTPMS Charge Amount: {$appliedTpmsCharge}\nDelivery Distance Miles: {$deliveryDistanceMiles}\nDelivery Charge: {$deliveryCharge}\nDelivery Out Of Range: ".($deliveryOutOfRange ? 'yes' : 'no')."\nTax Base: {$taxBase}\nVAT Enabled: ".($vatEnabled ? '1' : '0')."\nVAT Percentage: {$vatPercentage}\nVAT Amount: {$vatAmount}\nCurrency: {$currency}\nTotal: {$total}",
             ]);
 
+            // Store vehicle_year separately — column added via migration, gracefully skipped if not yet present
+            if (isset($data['vehicle_year']) && $data['vehicle_year']) {
+                try {
+                    $order->update(['vehicle_year' => (int) $data['vehicle_year']]);
+                } catch (\Throwable) {}
+            }
+
             DB::commit();
+
+            // Auto-create or update the vehicle record from checkout details
+            if ($vehicleRegistration) {
+                try {
+                    $vehicleData = array_filter([
+                        'make'   => $data['vehicle_make'] ?? null,
+                        'model'  => $data['vehicle_model'] ?? null,
+                        'year'   => isset($data['vehicle_year']) && $data['vehicle_year'] ? (int) $data['vehicle_year'] : null,
+                        'status' => 'active',
+                    ], fn ($v) => $v !== null && $v !== '');
+
+                    \App\Models\Vehicle::updateOrCreate(
+                        ['registration' => $vehicleRegistration],
+                        array_merge($vehicleData, ['user_id' => $user->id])
+                    );
+                } catch (\Throwable) {}
+            }
+
+            $this->whatsApp->notifyNewOrder($order);
 
             return $this->jsonSuccess([
                 'order' => $order,
@@ -502,7 +534,11 @@ $slotTakenByPaidOrder = Order::query()
             ], 'Booking successful!', 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Checkout failed: '.$e->getMessage());
+            Log::error('Checkout failed: '.$e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             return $this->jsonError('Failed to process booking. Please try again.', null, 500);
         }
@@ -586,7 +622,7 @@ $slotTakenByPaidOrder = Order::query()
         } catch (\Throwable $e) {
             Log::error('Stripe checkout session creation failed: '.$e->getMessage());
 
-            return $this->jsonError('Failed to start Stripe checkout.', null, 500);
+            return $this->jsonError('Failed to start Stripe checkout: '.$e->getMessage(), null, 500);
         }
     }
 
@@ -854,6 +890,7 @@ $slotTakenByPaidOrder = Order::query()
             ]));
 
             $this->orderConfirmationEmailService->sendOnceForPaidOrder($locked->id);
+            $this->whatsApp->notifyPaymentConfirmed($locked);
         });
     }
 }

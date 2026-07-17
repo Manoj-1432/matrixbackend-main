@@ -20,6 +20,7 @@ class SettingsController extends Controller
         'logo_url',
         'website_title',
         'address',
+        'business_postcode',
         'contact_number',
         'contact_email',
         'vat_number',
@@ -36,6 +37,7 @@ class SettingsController extends Controller
         'currency',
         'online_payment',
         'cash_on_delivery',
+        'min_fitting_date',
         'smtp_enabled',
         'smtp_host',
         'smtp_port',
@@ -116,27 +118,29 @@ class SettingsController extends Controller
     private function upsertSettings(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'brand_name'           => ['required', 'string', 'max:255'],
+            'brand_name'           => ['sometimes', 'nullable', 'string', 'max:255'],
             'logo_url'             => ['nullable', 'string', 'max:2048'],
             'website_title'        => ['nullable', 'string', 'max:255'],
             'address'              => ['nullable', 'string', 'max:1000'],
+            'business_postcode'    => ['nullable', 'string', 'max:20'],
             'contact_number'       => ['nullable', 'string', 'max:50'],
             'contact_email'        => ['nullable', 'email', 'max:255'],
             'vat_number'           => ['nullable', 'string', 'max:255'],
             'vat_percentage'       => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'vat_enabled'          => ['nullable', 'in:0,1'],
+            'vat_enabled'          => ['nullable', 'boolean'],
             'platform_fee'         => ['nullable', 'numeric', 'min:0'],
-            'platform_fee_enabled' => ['nullable', 'in:0,1'],
+            'platform_fee_enabled' => ['nullable', 'boolean'],
             'tpms_charge'          => ['nullable', 'numeric', 'min:0'],
-            'tpms_charge_enabled'  => ['nullable', 'in:0,1'],
-            'maintenance_mode'     => ['nullable', 'in:0,1'],
+            'tpms_charge_enabled'  => ['nullable', 'boolean'],
+            'maintenance_mode'     => ['nullable', 'boolean'],
             'maintenance_message'  => ['nullable', 'string', 'max:1000'],
             'timezone'             => ['nullable', 'string', 'max:255'],
             'country'              => ['nullable', 'string', 'max:255'],
             'currency'             => ['nullable', 'string', 'max:255'],
-            'online_payment'       => ['nullable', 'in:0,1'],
-            'cash_on_delivery'     => ['nullable', 'in:0,1'],
-            'smtp_enabled'         => ['nullable', 'in:0,1'],
+            'online_payment'       => ['nullable', 'boolean'],
+            'cash_on_delivery'     => ['nullable', 'boolean'],
+            'min_fitting_date'     => ['nullable', 'integer', 'min:0'],
+            'smtp_enabled'         => ['nullable', 'boolean'],
             'smtp_host'            => ['nullable', 'string', 'max:255'],
             'smtp_port'            => ['nullable', 'integer', 'min:1', 'max:65535'],
             'smtp_username'        => ['nullable', 'string', 'max:255'],
@@ -155,14 +159,21 @@ class SettingsController extends Controller
             );
         }
 
+        $booleanKeys = [
+            'vat_enabled', 'platform_fee_enabled', 'tpms_charge_enabled',
+            'maintenance_mode', 'online_payment', 'cash_on_delivery', 'smtp_enabled',
+        ];
+
         $map = [];
         foreach (self::SETTING_KEYS as $key) {
             $value = $request->input($key);
-            Setting::updateOrCreate(
-                ['key' => $key],
-                ['value' => $value !== null ? (string) $value : null]
-            );
-            $map[$key] = $value ?? '';
+            if (in_array($key, $booleanKeys, true)) {
+                $stored = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? '1' : '0';
+            } else {
+                $stored = $value !== null ? (string) $value : null;
+            }
+            Setting::updateOrCreate(['key' => $key], ['value' => $stored]);
+            $map[$key] = $stored ?? '';
         }
 
         return $this->jsonSuccess(

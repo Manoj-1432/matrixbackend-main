@@ -252,15 +252,28 @@ class OrderConfirmationEmailService
             return null;
         }
 
+        // Remote URL (R2, CDN, etc.) — fetch and convert to base64 data URI for DomPDF
+        if (str_starts_with($logoUrl, 'http://') || str_starts_with($logoUrl, 'https://')) {
+            try {
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->get($logoUrl);
+                if ($response->successful()) {
+                    $mime = $response->header('Content-Type') ?: 'image/png';
+                    $mime = explode(';', $mime)[0];
+                    return 'data:'.$mime.';base64,'.base64_encode($response->body());
+                }
+            } catch (\Throwable) {
+                // Fall through to null
+            }
+            return null;
+        }
+
         if (preg_match('~/storage/logos/([^/?#]+)$~', $logoUrl, $m) === 1) {
             $candidate = public_path('storage/logos/'.$m[1]);
-
             return file_exists($candidate) ? $candidate : null;
         }
 
         if (str_starts_with($logoUrl, '/')) {
             $candidate = public_path(ltrim($logoUrl, '/'));
-
             return file_exists($candidate) ? $candidate : null;
         }
 

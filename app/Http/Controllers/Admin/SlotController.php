@@ -70,8 +70,8 @@ class SlotController extends Controller
 
         $validator = Validator::make($request->all(), [
             'day'          => ['required', 'string', Rule::in(self::DAYS)],
-            'start_time'   => ['required', 'date_format:H:i,H:i:s'],
-            'end_time'     => ['required', 'date_format:H:i,H:i:s'],
+            'start_time'   => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
+            'end_time'     => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
             'max_bookings' => ['nullable', 'integer', 'min:1'],
             'status'       => ['nullable', 'string', Rule::in(['active', 'inactive'])],
         ]);
@@ -135,8 +135,8 @@ class SlotController extends Controller
 
         $validator = Validator::make($request->all(), [
             'day'        => ['required', 'string', Rule::in(self::DAYS)],
-            'start_time' => ['required', 'date_format:H:i,H:i:s'],
-            'end_time'   => ['required', 'date_format:H:i,H:i:s'],
+            'start_time' => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
+            'end_time'   => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
             'duration'   => ['required', 'integer', 'min:5'],
         ]);
 
@@ -218,8 +218,8 @@ class SlotController extends Controller
 
         $validator = Validator::make($request->all(), [
             'day'          => ['required', 'string', Rule::in(self::DAYS)],
-            'start_time'   => ['required', 'date_format:H:i,H:i:s'],
-            'end_time'     => ['required', 'date_format:H:i,H:i:s'],
+            'start_time'   => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
+            'end_time'     => ['required', 'regex:/^\d{2}:\d{2}(:\d{2})?$/'],
             'max_bookings' => ['nullable', 'integer', 'min:1'],
             'status'       => ['nullable', 'string', Rule::in(['active', 'inactive'])],
         ]);

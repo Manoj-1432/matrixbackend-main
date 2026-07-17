@@ -130,23 +130,30 @@ class ApiSettingsController extends Controller
         if (! $actor || ! $actor->hasPermission('api_settings')) {
             return $this->jsonError('You do not have permission to view API settings.', null, 403);
         }
-        // Ensure all 4 rows exist on first load; keep label/description/icon in sync with code
+        // Ensure all rows exist; use raw DB insert to avoid encrypted-cast issues
         foreach (self::KNOWN_APIS as $api) {
-            ApiSetting::firstOrCreate(
-                ['key_name' => $api['key_name']],
-                $api
+            \Illuminate\Support\Facades\DB::table('api_settings')->upsert(
+                [[
+                    'key_name'    => $api['key_name'],
+                    'label'       => $api['label'],
+                    'description' => $api['description'],
+                    'icon_type'   => $api['icon_type'],
+                    'is_enabled'  => $api['is_enabled'],
+                    'value'       => null,
+                    'created_at'  => now(),
+                    'updated_at'  => now(),
+                ]],
+                ['key_name'],
+                ['label', 'description', 'icon_type', 'updated_at']
             );
-            ApiSetting::query()->where('key_name', $api['key_name'])->update([
-                'label' => $api['label'],
-                'description' => $api['description'],
-                'icon_type' => $api['icon_type'],
-            ]);
         }
 
+        $keyOrder = array_column(self::KNOWN_APIS, 'key_name');
         $settings = ApiSetting::query()
-            ->whereIn('key_name', array_column(self::KNOWN_APIS, 'key_name'))
-            ->orderByRaw("FIELD(key_name, 'dvla','google_maps','openai','paypal','stripe_test','stripe_live','stripe_test_secret_key','stripe_test_publishable_key','stripe_test_webhook_secret','stripe_live_secret_key','stripe_live_publishable_key','stripe_live_webhook_secret','brand_ai_generate','size_ai_generate','tyre_description_ai_generate')")
-            ->get();
+            ->whereIn('key_name', $keyOrder)
+            ->get()
+            ->sortBy(fn ($s) => array_search($s->key_name, $keyOrder, true))
+            ->values();
 
         return $this->jsonSuccess([
             'settings' => $settings->map(fn (ApiSetting $s) => $this->settingResource($s)),
@@ -175,8 +182,14 @@ class ApiSettingsController extends Controller
             return $this->jsonError('Validation failed.', null, 422, $validator->errors()->toArray());
         }
 
-        $setting->value = $request->input('value');
-        $setting->save();
+        try {
+            \Illuminate\Support\Facades\DB::table('api_settings')
+                ->where('id', $id)
+                ->update(['value' => $request->input('value'), 'updated_at' => now()]);
+            $setting = ApiSetting::query()->find($id);
+        } catch (\Throwable $e) {
+            return $this->jsonError('Save failed: '.$e->getMessage(), null, 500);
+        }
 
         return $this->jsonSuccess($this->settingResource($setting), 'API key updated successfully.');
     }
@@ -259,16 +272,18 @@ class ApiSettingsController extends Controller
      */
     private function settingResource(ApiSetting $setting): array
     {
+        $val = $setting->value;
+
         return [
-            'id' => $setting->id,
-            'key_name' => $setting->key_name,
-            'label' => $setting->label,
+            'id'          => $setting->id,
+            'key_name'    => $setting->key_name,
+            'label'       => $setting->label,
             'description' => $setting->description,
-            'icon_type' => $setting->icon_type,
-            'value' => $setting->value ? '••••••••••••••••••••••••'.substr((string) $setting->value, -4) : null,
-            'has_key' => ! empty($setting->value),
-            'is_enabled' => $setting->is_enabled,
-            'updated_at' => $setting->updated_at?->toIso8601String(),
+            'icon_type'   => $setting->icon_type,
+            'value'       => $val ? '••••••••••••••••••••••••'.substr((string) $val, -4) : null,
+            'has_key'     => ! empty($val),
+            'is_enabled'  => $setting->is_enabled,
+            'updated_at'  => $setting->updated_at?->toIso8601String(),
         ];
     }
 }

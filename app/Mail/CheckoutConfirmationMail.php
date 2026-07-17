@@ -34,8 +34,8 @@ class CheckoutConfirmationMail extends Mailable
     public function content(): Content
     {
         $frontendBaseUrl = rtrim((string) config('workatmo.frontend_url', config('app.url')), '/');
-        $loginUrl = $frontendBaseUrl.'/account/login';
-        $forgotPasswordUrl = $frontendBaseUrl.'/account/forgot-password';
+        $loginUrl = $frontendBaseUrl.'/login';
+        $forgotPasswordUrl = $frontendBaseUrl.'/forgot-password';
 
         return new Content(
             view: 'emails.checkout_confirmation',

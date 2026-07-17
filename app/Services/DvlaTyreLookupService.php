@@ -85,28 +85,35 @@ class DvlaTyreLookupService
         }
         $vehicle = $this->normalizeVehiclePayload($vehicle);
 
-        $openaiSetting = ApiSetting::query()->where('key_name', 'openai')->first();
-        $tyre = null;
+        $tyre      = null;
         $tyreError = null;
 
-        $hasKey = $openaiSetting && trim((string) $openaiSetting->value) !== '';
+        $make     = ucfirst(strtolower(trim((string) ($vehicle['make'] ?? ''))));
+        $model    = trim((string) ($vehicle['model'] ?? ''));
+        $year     = (int) ($vehicle['yearOfManufacture'] ?? 0);
+        $engineCc = (int) ($vehicle['engineCapacity'] ?? 0);
+        $fuelType = strtolower(trim((string) ($vehicle['fuelType'] ?? '')));
 
-        if ($hasKey && $openaiSetting->is_enabled) {
-            $tyreCall = $this->callOpenAiForTyres($openaiSetting->value, $vehicle);
+        $openaiSetting = ApiSetting::query()->where('key_name', 'openai')->first();
+        $openaiKey = ($openaiSetting && $openaiSetting->is_enabled)
+            ? trim((string) $openaiSetting->value)
+            : '';
+
+        // Pass engine cc and fuel type into vehicle so the prompt can use them
+        $vehicle['engineCapacity'] = $engineCc;
+        $vehicle['fuelType']       = $fuelType;
+
+        if ($openaiKey !== '') {
+            $tyreCall = $this->callOpenAiForTyres($openaiKey, $vehicle);
             if ($tyreCall['ok']) {
                 $tyre = $tyreCall['data'];
             } else {
                 $tyreError = $tyreCall;
             }
-        } else {
-            $message = ! $openaiSetting || ! $hasKey
-                ? 'Add a Workatmo Tyre API key under API Settings (Workatmo Tyre Api card), then save.'
-                : 'Turn on the Workatmo Tyre Api toggle in API Settings to enable tyre recommendations.';
+        }
 
-            $tyreError = [
-                'skipped' => true,
-                'error' => $message,
-            ];
+        if ($tyre === null && $tyreError === null) {
+            $tyreError = ['skipped' => true, 'error' => 'Enable OpenAI in Admin → API Settings to get tyre size recommendations.'];
         }
 
         return [
@@ -153,7 +160,7 @@ class DvlaTyreLookupService
             return [
                 'ok' => false,
                 'http_code' => $httpCode,
-                'error' => 'DVLA request rejected.',
+                'error' => 'DVLA request rejected (HTTP '.$httpCode.'). Check your API key in Admin → API Settings.',
                 'body' => $decoded ?? $response,
             ];
         }
@@ -192,25 +199,193 @@ class DvlaTyreLookupService
     }
 
     /**
+     * @return array{ok: bool, data?: array<string, mixed>, error?: string}
+     * @deprecated VDIM is US-only; kept in case US makes are added in future
+     */
+    private function callVdimApi(string $apiKey, string $make, string $model, int $year): array
+    {
+        $headers = ["x-api-key: {$apiKey}", 'Accept: application/json'];
+
+        // Step 1: get available trims
+        $trimParams = http_build_query(array_filter([
+            'year'  => $year,
+            'make'  => $make,
+            'model' => $model ?: null,
+        ]));
+        $trimUrl = 'https://tire.vdim.app/api/v1/trims?' . $trimParams;
+        $ch = curl_init($trimUrl);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
+        $trimRaw  = curl_exec($ch);
+        $trimCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $trim = null;
+        if ($trimRaw !== false && $trimCode === 200) {
+            $trimData = json_decode((string) $trimRaw, true);
+            // Response may be an array of trim strings, or objects with a "trim" key
+            if (is_array($trimData)) {
+                $first = $trimData[0] ?? null;
+                if (is_string($first) && $first !== '') {
+                    $trim = $first;
+                } elseif (is_array($first)) {
+                    $trim = $first['trim'] ?? $first['name'] ?? null;
+                }
+                // unwrap nested data key
+                if ($trim === null && isset($trimData['data'][0])) {
+                    $t = $trimData['data'][0];
+                    $trim = is_string($t) ? $t : ($t['trim'] ?? $t['name'] ?? null);
+                }
+            }
+        }
+
+        if ($trim === null) {
+            return ['ok' => false, 'error' => "VDIM trims endpoint returned no trims (HTTP {$trimCode})"];
+        }
+
+        // Step 2: get tyre dimensions for that trim
+        $dimParams = http_build_query(array_filter([
+            'year'  => $year,
+            'make'  => $make,
+            'model' => $model ?: null,
+            'trim'  => $trim,
+        ]));
+        $dimUrl = 'https://tire.vdim.app/api/v1/tire_dimensions?' . $dimParams;
+        $ch = curl_init($dimUrl);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 10]);
+        $raw      = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($raw === false || $httpCode < 200 || $httpCode >= 300) {
+            return ['ok' => false, 'error' => "VDIM tire_dimensions returned HTTP {$httpCode}"];
+        }
+
+        $decoded = json_decode((string) $raw, true);
+        if (! is_array($decoded)) {
+            return ['ok' => false, 'error' => 'VDIM API returned invalid JSON'];
+        }
+
+        $sizes = $this->parseSizesFromVdim($decoded);
+        if (empty($sizes)) {
+            return ['ok' => false, 'error' => 'No tyre sizes found in VDIM response'];
+        }
+
+        return ['ok' => true, 'data' => [
+            'likely_sizes'                   => $sizes,
+            'notes'                          => ["Source: Virtual Dimension ({$trim})"],
+            'recommended_pressure_psi_front' => 0,
+            'recommended_pressure_psi_rear'  => 0,
+        ]];
+    }
+
+    /** @param array<string, mixed> $data @return string[] */
+    private function parseSizesFromVdim(array $data): array
+    {
+        $sizes = [];
+        $items = $data['dimensions'] ?? $data['data'] ?? $data['fitments'] ?? $data['results'] ?? $data;
+        if (! is_array($items)) return [];
+
+        $sizeKeys = ['front_tire', 'rear_tire', 'tire', 'tyre', 'size', 'tire_size'];
+
+        if (isset($items[0]) && is_array($items[0])) {
+            foreach ($items as $item) {
+                foreach ($sizeKeys as $key) {
+                    if (isset($item[$key]) && is_string($item[$key]) && $item[$key] !== '') {
+                        $sizes[] = $this->normalizeTireSize($item[$key]);
+                    }
+                }
+                foreach (['front', 'rear'] as $pos) {
+                    if (is_array($item[$pos] ?? null)) {
+                        foreach ($sizeKeys as $key) {
+                            if (isset($item[$pos][$key]) && is_string($item[$pos][$key])) {
+                                $sizes[] = $this->normalizeTireSize($item[$pos][$key]);
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            foreach ($sizeKeys as $key) {
+                if (isset($items[$key]) && is_string($items[$key]) && $items[$key] !== '') {
+                    $sizes[] = $this->normalizeTireSize($items[$key]);
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($sizes)));
+    }
+
+    private function normalizeTireSize(string $size): string
+    {
+        $size = strtoupper(trim($size));
+        return preg_replace('/(\d)R(\d)/i', '$1 R$2', $size) ?? $size;
+    }
+
+    private function identifyModelWithOpenAi(string $apiKey, string $make, int $year, int $engineCc, string $fuelType): string
+    {
+        $desc = "{$make}, year {$year}";
+        if ($engineCc > 0) $desc .= ", engine {$engineCc}cc";
+        if ($fuelType !== '') $desc .= ", fuel {$fuelType}";
+
+        $payload = [
+            'model'       => 'gpt-4o-mini',
+            'messages'    => [
+                ['role' => 'system', 'content' => 'You are a UK automotive expert. Reply with only the model name, nothing else.'],
+                ['role' => 'user', 'content' => "Most likely UK model name for: {$desc}? Reply with just the model (e.g. Corsa, Astra, Focus)."],
+            ],
+            'max_tokens'  => 20,
+            'temperature' => 0.1,
+        ];
+
+        $ch = curl_init('https://api.openai.com/v1/chat/completions');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => json_encode($payload),
+            CURLOPT_HTTPHEADER     => ["Authorization: Bearer {$apiKey}", 'Content-Type: application/json'],
+            CURLOPT_TIMEOUT        => 15,
+        ]);
+        $raw = curl_exec($ch);
+        curl_close($ch);
+
+        if ($raw === false) return '';
+        $decoded = json_decode((string) $raw, true);
+        $model   = trim((string) ($decoded['choices'][0]['message']['content'] ?? ''));
+        return preg_replace('/[^a-zA-Z0-9\s\-]/', '', $model);
+    }
+
+    /**
      * @param  array<string, mixed>  $vehicleData
      * @return array{ok: true, data: array<string, mixed>}|array{ok: false, error: string, httpCode?: int, details?: mixed, raw?: string}
      */
     private function callOpenAiForTyres(string $openAiKey, array $vehicleData): array
     {
-        $vehicleJson = json_encode($vehicleData, JSON_UNESCAPED_SLASHES);
-        $prompt = "Using this DVLA vehicle response JSON: {$vehicleJson}. "
-            .'Use the provided make/year/model-related fields from this response only. '
-            .'Return strict JSON with keys: likely_sizes (array of strings), '
-            .'recommended_pressure_psi_front, recommended_pressure_psi_rear, notes (array of strings). '
-            .'If model is missing in DVLA data, give best likely tyre sizes for the make/year and include clear uncertainty notes.';
+        $make     = ucfirst(strtolower(trim((string) ($vehicleData['make'] ?? ''))));
+        $model    = trim((string) ($vehicleData['model'] ?? ''));
+        $year     = (int) ($vehicleData['yearOfManufacture'] ?? 0);
+        $engineCc = (int) ($vehicleData['engineCapacity'] ?? 0);
+        $fuelType = strtolower(trim((string) ($vehicleData['fuelType'] ?? '')));
+
+        $vehicleDesc = "{$make}";
+        if ($model !== '') $vehicleDesc .= " {$model}";
+        if ($year > 0)     $vehicleDesc .= " ({$year})";
+        if ($engineCc > 0) $vehicleDesc .= ", {$engineCc}cc";
+        if ($fuelType !== '') $vehicleDesc .= " {$fuelType}";
+
+        $prompt = "UK-registered vehicle: {$vehicleDesc}.\n"
+            ."Using the engine size to identify the specific trim/variant, return the OEM factory-fitted tyre sizes for the UK market.\n"
+            ."Return up to 3 most common sizes (different trims may have different sizes).\n"
+            ."Format each size exactly like: 185/65 R15 (width/profile Rrim, with space before R).\n"
+            ."Return ONLY valid JSON, no markdown:\n"
+            ."{\"likely_sizes\":[\"185/65 R15\"],\"notes\":[\"Source: OEM spec\"],\"recommended_pressure_psi_front\":32,\"recommended_pressure_psi_rear\":30}";
 
         $payload = [
             'model' => 'gpt-4o-mini',
             'messages' => [
-                ['role' => 'system', 'content' => 'You are an automotive assistant. Reply with valid JSON only.'],
+                ['role' => 'system', 'content' => 'You are an expert automotive tyre specialist. Reply with valid JSON only, no markdown.'],
                 ['role' => 'user', 'content' => $prompt],
             ],
-            'temperature' => 0.2,
+            'temperature' => 0.1,
         ];
 
         $ch = curl_init('https://api.openai.com/v1/chat/completions');

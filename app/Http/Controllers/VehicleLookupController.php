@@ -35,7 +35,7 @@ class VehicleLookupController extends Controller
 
             $normalizedTyreSize = strtoupper(preg_replace('/\s+/', '', $tyreSize));
             $matchedTyres = Tyre::query()
-                ->with(['brand', 'size', 'season', 'speedRating'])
+                ->with(['brand', 'size', 'season', 'tyreType', 'fuelEfficiency', 'speedRating'])
                 ->where('status', true)
                 ->whereHas('size', function ($query) use ($normalizedTyreSize) {
                     $query->whereRaw('UPPER(REPLACE(label, " ", "")) = ?', [$normalizedTyreSize]);
@@ -54,7 +54,7 @@ class VehicleLookupController extends Controller
                     'model' => $tyreSize,
                     'yearOfManufacture' => now()->year,
                 ],
-                'tyres' => $matchedTyres,
+                'tyres' => $matchedTyres->map(fn ($t) => $this->tyreResource($t))->values(),
                 'tyre' => [
                     'likely_sizes' => [$tyreSize],
                 ],
@@ -94,7 +94,7 @@ class VehicleLookupController extends Controller
             $normalizedLikelySizes = array_values(array_unique($normalizedLikelySizes));
 
             $matchedTyres = Tyre::query()
-                ->with(['brand', 'size', 'season'])
+                ->with(['brand', 'size', 'season', 'tyreType', 'fuelEfficiency', 'speedRating'])
                 ->where('status', true)
                 ->whereHas('size', function ($query) use ($normalizedLikelySizes) {
                     $query->where(function ($sizeQuery) use ($normalizedLikelySizes) {
@@ -110,7 +110,7 @@ class VehicleLookupController extends Controller
                 ->limit(24)
                 ->get();
 
-            $result['tyres'] = $matchedTyres;
+            $result['tyres'] = $matchedTyres->map(fn ($t) => $this->tyreResource($t))->values();
         } else {
             $result['tyres'] = [];
         }
@@ -158,5 +158,26 @@ class VehicleLookupController extends Controller
             ->value('value');
 
         return is_string($value) ? trim($value) : '';
+    }
+
+    private function tyreResource(\App\Models\Tyre $tyre): array
+    {
+        return [
+            'id'                  => $tyre->id,
+            'brand_id'            => $tyre->brand_id,
+            'brand_name'          => $tyre->brand?->name,
+            'model'               => $tyre->model,
+            'size_id'             => $tyre->size_id,
+            'size_label'          => $tyre->size?->label,
+            'season_name'         => $tyre->season?->name,
+            'tyre_type_name'      => $tyre->tyreType?->name,
+            'fuel_efficiency'     => $tyre->fuelEfficiency ? ['rating' => $tyre->fuelEfficiency->rating] : null,
+            'speed_rating'        => $tyre->speedRating ? ['rating' => $tyre->speedRating->rating] : null,
+            'price'               => (float) $tyre->price,
+            'stock'               => (int) $tyre->stock,
+            'description'         => $tyre->description,
+            'status'              => (bool) $tyre->status,
+            'image_url'           => $tyre->image_url,
+        ];
     }
 }

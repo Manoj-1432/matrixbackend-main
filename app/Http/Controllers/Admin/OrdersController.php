@@ -21,7 +21,7 @@ class OrdersController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Order::with(['user:id,name,email,phone', 'slot'])
+        $query = Order::with(['user:id,name,email,phone,address,city,postcode', 'slot'])
             ->orderBy('created_at', 'desc');
 
         // Search by customer name / vehicle registration
@@ -87,6 +87,79 @@ class OrdersController extends Controller
                     'total'        => $paginated->total(),
                 ],
                 'stats' => $stats,
+            ],
+        ]);
+    }
+
+    /**
+     * Look up vehicle details from orders by registration plate.
+     * GET /api/admin/orders/vehicle-lookup?registration=XX
+     */
+    public function vehicleLookup(Request $request): JsonResponse
+    {
+        $reg = mb_strtoupper(trim((string) ($request->query('registration', ''))));
+
+        if ($reg === '') {
+            return response()->json(['data' => null]);
+        }
+
+        $order = Order::with('user:id,name,email,phone')
+            ->where('vehicle_registration', $reg)
+            ->whereNotNull('vehicle_make')
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (! $order) {
+            // Try partial / without spaces
+            $stripped = str_replace(' ', '', $reg);
+            $order = Order::with('user:id,name,email,phone')
+                ->whereRaw("REPLACE(vehicle_registration, ' ', '') = ?", [$stripped])
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
+        if (! $order) {
+            return response()->json(['data' => null]);
+        }
+
+        return response()->json([
+            'data' => [
+                'registration' => $order->vehicle_registration,
+                'make'         => $order->vehicle_make,
+                'model'        => $order->vehicle_model,
+                'year'         => $order->vehicle_year,
+                'user_id'      => $order->user?->id,
+                'user_name'    => $order->user?->name,
+                'user_email'   => $order->user?->email,
+            ],
+        ]);
+    }
+
+    /**
+     * Lightweight notifications summary: pending count + recent new orders.
+     */
+    public function notifications(Request $request): JsonResponse
+    {
+        $pendingCount = Order::where('status', 'pending')->count();
+
+        $recent = Order::with(['user:id,name,email'])
+            ->where('created_at', '>=', Carbon::now()->subHours(24))
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get()
+            ->map(fn (Order $o) => [
+                'id'         => $o->id,
+                'order_ref'  => $o->order_ref ?? 'ORD-'.str_pad((string) $o->id, 3, '0', STR_PAD_LEFT),
+                'customer'   => $o->user?->name ?? 'Guest',
+                'amount'     => (float) $o->amount,
+                'status'     => $o->status,
+                'created_at' => $o->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json([
+            'data' => [
+                'pending_count' => $pendingCount,
+                'recent_orders' => $recent,
             ],
         ]);
     }
@@ -408,20 +481,28 @@ class OrdersController extends Controller
             return null;
         }
 
-        // Settings UI stores values like "/storage/logos/foo.png" or full URLs.
+        // Remote URL (R2, CDN) — fetch and convert to base64 data URI for DomPDF
+        if (str_starts_with($logoUrl, 'http://') || str_starts_with($logoUrl, 'https://')) {
+            try {
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->get($logoUrl);
+                if ($response->successful()) {
+                    $mime = explode(';', $response->header('Content-Type') ?: 'image/png')[0];
+                    return 'data:'.$mime.';base64,'.base64_encode($response->body());
+                }
+            } catch (\Throwable) {}
+            return null;
+        }
+
         if (preg_match('~/storage/logos/([^/?#]+)$~', $logoUrl, $m) === 1) {
             $candidate = public_path('storage/logos/' . $m[1]);
-
             return file_exists($candidate) ? $candidate : null;
         }
 
         if (str_starts_with($logoUrl, '/')) {
             $candidate = public_path(ltrim($logoUrl, '/'));
-
             return file_exists($candidate) ? $candidate : null;
         }
 
-        // Remote URLs are not embeddable by DomPDF without enable_remote; fall back to text.
         return null;
     }
 

@@ -15,6 +15,10 @@ class DeliveryChargeService
 
     private const DISTANCE_MATRIX_URL = 'https://maps.googleapis.com/maps/api/distancematrix/json';
 
+    private const POSTCODES_IO_URL = 'https://api.postcodes.io/postcodes';
+
+    private const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving';
+
     private const METERS_PER_MILE = 1609.344;
 
     /**
@@ -51,11 +55,140 @@ class DeliveryChargeService
         return $this->buildQuoteResult($distanceMiles);
     }
 
+    /**
+     * Quote delivery using only a postcode via postcodes.io (no API key required).
+     * Uses Haversine straight-line distance from the business postcode.
+     *
+     * @return array{distance_miles: float, delivery_charge: float, matched_tier: array|null, out_of_range: bool}
+     * @throws \RuntimeException
+     */
+    public function quoteForPostcode(string $postcode): array
+    {
+        $postcode = trim(strtoupper(preg_replace('/\s+/', '', $postcode)));
+        if ($postcode === '') {
+            throw new \RuntimeException('Postcode is required.', 422);
+        }
+
+        $businessPostcode = $this->getBusinessPostcode();
+        if ($businessPostcode === '') {
+            throw new \RuntimeException('Business postcode is not configured. Please set it in Admin → Settings.', 503);
+        }
+
+        $customerCoords = $this->coordsForPostcode($postcode);
+        $businessCoords = $this->coordsForPostcode($businessPostcode);
+
+        $distanceMiles = $this->drivingDistanceMilesOsrm(
+            $businessCoords['lat'], $businessCoords['lng'],
+            $customerCoords['lat'], $customerCoords['lng']
+        );
+
+        return $this->buildQuoteResult($distanceMiles);
+    }
+
+    /**
+     * @return array{lat: float, lng: float}
+     * @throws \RuntimeException
+     */
+    public function coordsForPostcode(string $postcode): array
+    {
+        $postcode = strtoupper(preg_replace('/\s+/', '', $postcode));
+        $cacheKey = 'postcode_coords:' . $postcode;
+
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && isset($cached['lat'], $cached['lng'])) {
+            return $cached;
+        }
+
+        try {
+            $response = Http::timeout(10)->get(self::POSTCODES_IO_URL . '/' . urlencode($postcode));
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('Could not reach postcode lookup service.', 502);
+        }
+
+        if (! $response->ok()) {
+            throw new \RuntimeException('Invalid or unknown postcode.', 422);
+        }
+
+        $payload = $response->json();
+        $lat = $payload['result']['latitude'] ?? null;
+        $lng = $payload['result']['longitude'] ?? null;
+
+        if ($lat === null || $lng === null) {
+            throw new \RuntimeException('Could not locate postcode.', 422);
+        }
+
+        $coords = ['lat' => (float) $lat, 'lng' => (float) $lng];
+        Cache::put($cacheKey, $coords, now()->addDays(30));
+
+        return $coords;
+    }
+
+    /**
+     * Get driving distance in miles using OSRM (free, no API key required).
+     * Falls back to Haversine if OSRM is unavailable.
+     */
+    public function drivingDistanceMilesOsrm(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $cacheKey = 'osrm_dist:' . md5("{$lat1},{$lng1},{$lat2},{$lng2}");
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return (float) $cached;
+        }
+
+        try {
+            // OSRM expects lng,lat order
+            $url = self::OSRM_URL . "/{$lng1},{$lat1};{$lng2},{$lat2}?overview=false";
+            $response = Http::timeout(10)->get($url);
+
+            if ($response->ok()) {
+                $payload = $response->json();
+                $meters = $payload['routes'][0]['distance'] ?? null;
+                if ($meters !== null && $meters > 0) {
+                    $miles = round((float) $meters / self::METERS_PER_MILE, 2);
+                    Cache::put($cacheKey, $miles, now()->addDays(7));
+                    return $miles;
+                }
+            }
+        } catch (\Throwable) {
+            // fall through to Haversine
+        }
+
+        // Fallback: straight-line Haversine
+        return $this->haversineDistanceMiles($lat1, $lng1, $lat2, $lng2);
+    }
+
+    public function haversineDistanceMiles(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $earthRadiusMiles = 3958.8;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+        return round($earthRadiusMiles * 2 * asin(sqrt($a)), 2);
+    }
+
     public function getBusinessAddress(): string
     {
         $value = Setting::query()->where('key', 'address')->value('value');
 
         return trim((string) ($value ?? ''));
+    }
+
+    public function getBusinessPostcode(): string
+    {
+        // Use explicit postcode field first
+        $explicit = Setting::query()->where('key', 'business_postcode')->value('value');
+        if ($explicit !== null && trim($explicit) !== '') {
+            return strtoupper(preg_replace('/\s+/', '', trim($explicit)));
+        }
+
+        // Fall back: extract from address field
+        $address = $this->getBusinessAddress();
+        if (preg_match('/([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$/i', $address, $m)) {
+            return strtoupper(preg_replace('/\s+/', '', $m[1]));
+        }
+
+        return '';
     }
 
     /**
