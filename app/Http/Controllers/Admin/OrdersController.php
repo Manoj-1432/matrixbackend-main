@@ -127,6 +127,7 @@ class OrdersController extends Controller
                 'registration' => $order->vehicle_registration,
                 'make'         => $order->vehicle_make,
                 'model'        => $order->vehicle_model,
+                'year'         => $order->vehicle_year,
                 'user_id'      => $order->user?->id,
                 'user_name'    => $order->user?->name,
                 'user_email'   => $order->user?->email,

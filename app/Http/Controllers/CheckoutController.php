@@ -310,6 +310,7 @@ class CheckoutController extends Controller
             'vehicle_registration' => 'nullable|string|max:50',
             'vehicle_make' => 'nullable|string|max:100',
             'vehicle_model' => 'nullable|string|max:100',
+            'vehicle_year' => 'nullable|integer|min:1990|max:'.((int) date('Y') + 1),
 
             'tyre_brand' => 'required|string',
             'tyre_model' => 'required|string',
@@ -462,6 +463,7 @@ $slotTakenByPaidOrder = Order::query()
                 'vehicle_registration' => $vehicleRegistration,
                 'vehicle_make' => $data['vehicle_make'] ?? '',
                 'vehicle_model' => $data['vehicle_model'] ?? '',
+                'vehicle_year' => isset($data['vehicle_year']) && $data['vehicle_year'] ? (int) $data['vehicle_year'] : null,
                 'service_type' => $serviceType,
                 'tyre_brand' => $data['tyre_brand'],
                 'tyre_model' => $data['tyre_model'],

@@ -18,6 +18,7 @@ class Order extends Model
         'vehicle_registration',
         'vehicle_make',
         'vehicle_model',
+        'vehicle_year',
         'service_type',
         'tyre_brand',
         'tyre_model',
@@ -46,6 +47,7 @@ class Order extends Model
         'delivery_distance_miles' => 'decimal:2',
         'paid_at' => 'datetime',
         'fitting_date' => 'date',
+        'vehicle_year' => 'integer',
         'is_new_user' => 'boolean',
         'confirmation_email_sent_at' => 'datetime',
     ];
