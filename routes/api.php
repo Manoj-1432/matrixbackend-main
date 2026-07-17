@@ -44,6 +44,30 @@ Route::get('/debug/resend-email/{orderId}', function (int $orderId) {
         return response()->json(['error' => 'Order has no user attached', 'user_id' => $order->user_id]);
     }
 
+    $resendKey = config('services.resend.key') ?: env('RESEND_API_KEY');
+
+    // Debug: try Resend directly without going through AdminSmtpMailer
+    if ($resendKey) {
+        try {
+            \Illuminate\Support\Facades\Mail::mailer('resend')
+                ->to('info@matrixmobiletyresandautos.com')
+                ->send(new class extends \Illuminate\Mail\Mailable {
+                    public function envelope(): \Illuminate\Mail\Mailables\Envelope {
+                        return new \Illuminate\Mail\Mailables\Envelope(subject: 'Matrix Tyres — Resend Test');
+                    }
+                    public function content(): \Illuminate\Mail\Mailables\Content {
+                        return new \Illuminate\Mail\Mailables\Content(htmlString: '<h1>Resend is working!</h1>');
+                    }
+                    public function attachments(): array { return []; }
+                });
+            return response()->json(['resend_key_present' => true, 'status' => 'Resend test email sent!']);
+        } catch (\Throwable $e) {
+            return response()->json(['resend_key_present' => true, 'resend_error' => $e->getMessage()]);
+        }
+    }
+
+    return response()->json(['resend_key_present' => false, 'env_check' => env('RESEND_API_KEY') ? 'set' : 'missing']);
+
     $mailer = app(\App\Services\AdminSmtpMailer::class);
     $smtpConfig = $mailer->resolveSmtpConfig();
     if ($smtpConfig === null) {
