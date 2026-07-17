@@ -44,57 +44,36 @@ Route::get('/debug/resend-email/{orderId}', function (int $orderId) {
         return response()->json(['error' => 'Order has no user attached', 'user_id' => $order->user_id]);
     }
 
+    $fromEmail = \App\Models\Setting::query()->where('key', 'smtp_from_email')->value('value') ?: 'info@matrixmobiletyresandautos.com';
+    $fromName  = \App\Models\Setting::query()->where('key', 'smtp_from_name')->value('value') ?: 'Matrix Mobile Tyres';
     $resendKey = config('services.resend.key') ?: env('RESEND_API_KEY');
 
-    // Debug: try Resend directly without going through AdminSmtpMailer
-    if ($resendKey) {
-        try {
-            \Illuminate\Support\Facades\Mail::mailer('resend')
-                ->to('info@matrixmobiletyresandautos.com')
-                ->send(new class extends \Illuminate\Mail\Mailable {
-                    public function envelope(): \Illuminate\Mail\Mailables\Envelope {
-                        return new \Illuminate\Mail\Mailables\Envelope(subject: 'Matrix Tyres — Resend Test');
-                    }
-                    public function content(): \Illuminate\Mail\Mailables\Content {
-                        return new \Illuminate\Mail\Mailables\Content(htmlString: '<h1>Resend is working!</h1>');
-                    }
-                    public function attachments(): array { return []; }
-                });
-            return response()->json(['resend_key_present' => true, 'status' => 'Resend test email sent!']);
-        } catch (\Throwable $e) {
-            return response()->json(['resend_key_present' => true, 'resend_error' => $e->getMessage()]);
-        }
-    }
-
-    return response()->json(['resend_key_present' => false, 'env_check' => env('RESEND_API_KEY') ? 'set' : 'missing']);
-
-    $mailer = app(\App\Services\AdminSmtpMailer::class);
-    $smtpConfig = $mailer->resolveSmtpConfig();
-    if ($smtpConfig === null) {
-        return response()->json(['error' => 'SMTP resolveSmtpConfig() returned null — settings not saved correctly']);
+    if (! $resendKey) {
+        return response()->json(['error' => 'RESEND_API_KEY not set in Railway Variables']);
     }
 
     try {
-        $mailable = new \App\Mail\CheckoutConfirmationMail(
-            $order,
-            new \Illuminate\Mail\Mailables\Address($smtpConfig['from_email'], $smtpConfig['from_name']),
-            'test-password-123'
-        );
-        $mailer->sendTo($order->user->email, $mailable);
-        $order->update(['confirmation_email_sent_at' => now()]);
+        $fe = $fromEmail;
+        $fn = $fromName;
+        \Illuminate\Support\Facades\Mail::mailer('resend')
+            ->to($fe)
+            ->send(new class($fe, $fn) extends \Illuminate\Mail\Mailable {
+                public function __construct(private string $fe, private string $fn) { parent::__construct(); }
+                public function envelope(): \Illuminate\Mail\Mailables\Envelope {
+                    return new \Illuminate\Mail\Mailables\Envelope(
+                        from: new \Illuminate\Mail\Mailables\Address($this->fe, $this->fn),
+                        subject: 'Matrix Tyres — Resend Test',
+                    );
+                }
+                public function content(): \Illuminate\Mail\Mailables\Content {
+                    return new \Illuminate\Mail\Mailables\Content(htmlString: '<h1>Resend is working!</h1><p>Email sending is configured correctly.</p>');
+                }
+                public function attachments(): array { return []; }
+            });
+        return response()->json(['status' => 'Resend test email sent to '.$fromEmail]);
     } catch (\Throwable $e) {
-        return response()->json([
-            'error'   => $e->getMessage(),
-            'class'   => get_class($e),
-            'file'    => $e->getFile().':'.$e->getLine(),
-        ]);
+        return response()->json(['resend_error' => $e->getMessage(), 'from_email' => $fromEmail]);
     }
-
-    return response()->json([
-        'order_id'   => $order->id,
-        'user_email' => $order->user->email,
-        'result'     => 'email sent successfully',
-    ]);
 });
 
 
