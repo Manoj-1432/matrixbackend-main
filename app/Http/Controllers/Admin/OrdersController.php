@@ -92,6 +92,49 @@ class OrdersController extends Controller
     }
 
     /**
+     * Look up vehicle details from orders by registration plate.
+     * GET /api/admin/orders/vehicle-lookup?registration=XX
+     */
+    public function vehicleLookup(Request $request): JsonResponse
+    {
+        $reg = mb_strtoupper(trim((string) ($request->query('registration', ''))));
+
+        if ($reg === '') {
+            return response()->json(['data' => null]);
+        }
+
+        $order = Order::with('user:id,name,email,phone')
+            ->where('vehicle_registration', $reg)
+            ->whereNotNull('vehicle_make')
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (! $order) {
+            // Try partial / without spaces
+            $stripped = str_replace(' ', '', $reg);
+            $order = Order::with('user:id,name,email,phone')
+                ->whereRaw("REPLACE(vehicle_registration, ' ', '') = ?", [$stripped])
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
+        if (! $order) {
+            return response()->json(['data' => null]);
+        }
+
+        return response()->json([
+            'data' => [
+                'registration' => $order->vehicle_registration,
+                'make'         => $order->vehicle_make,
+                'model'        => $order->vehicle_model,
+                'user_id'      => $order->user?->id,
+                'user_name'    => $order->user?->name,
+                'user_email'   => $order->user?->email,
+            ],
+        ]);
+    }
+
+    /**
      * Lightweight notifications summary: pending count + recent new orders.
      */
     public function notifications(Request $request): JsonResponse
