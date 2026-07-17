@@ -58,7 +58,7 @@ Route::get('/debug/resend-email/{orderId}', function (int $orderId) {
         \Illuminate\Support\Facades\Mail::mailer('resend')
             ->to($fe)
             ->send(new class($fe, $fn) extends \Illuminate\Mail\Mailable {
-                public function __construct(private string $fe, private string $fn) { parent::__construct(); }
+                public function __construct(private string $fe, private string $fn) {}
                 public function envelope(): \Illuminate\Mail\Mailables\Envelope {
                     return new \Illuminate\Mail\Mailables\Envelope(
                         from: new \Illuminate\Mail\Mailables\Address($this->fe, $this->fn),
