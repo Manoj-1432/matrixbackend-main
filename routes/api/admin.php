@@ -42,6 +42,50 @@ Route::prefix('admin')->group(function () {
         // Dashboard stats endpoint
         Route::get('dashboard', [DashboardController::class, 'index']);
 
+        // WhatsApp test — GET /api/admin/test-whatsapp
+        Route::get('test-whatsapp', function () {
+            $sid   = config('services.twilio.sid')   ?: env('TWILIO_ACCOUNT_SID');
+            $token = config('services.twilio.token') ?: env('TWILIO_AUTH_TOKEN');
+            $from  = config('services.twilio.whatsapp_from') ?: env('TWILIO_WHATSAPP_FROM');
+            $to    = config('services.twilio.whatsapp_to')   ?: env('TWILIO_WHATSAPP_TO');
+
+            if (! $sid || ! $token || ! $from || ! $to) {
+                return response()->json(['data' => [
+                    'configured' => false,
+                    'missing' => array_keys(array_filter([
+                        'TWILIO_ACCOUNT_SID'   => ! $sid,
+                        'TWILIO_AUTH_TOKEN'    => ! $token,
+                        'TWILIO_WHATSAPP_FROM' => ! $from,
+                        'TWILIO_WHATSAPP_TO'   => ! $to,
+                    ])),
+                ]]);
+            }
+
+            try {
+                $response = \Illuminate\Support\Facades\Http::withBasicAuth($sid, $token)
+                    ->asForm()
+                    ->post("https://api.twilio.com/2010-04-01/Accounts/{$sid}/Messages.json", [
+                        'From' => $from,
+                        'To'   => $to,
+                        'Body' => '✅ Matrix Tyres WhatsApp test message.',
+                    ]);
+
+                return response()->json(['data' => [
+                    'configured' => true,
+                    'from'       => $from,
+                    'to'         => $to,
+                    'http_status' => $response->status(),
+                    'twilio_response' => $response->json(),
+                    'success' => $response->successful(),
+                ]]);
+            } catch (\Throwable $e) {
+                return response()->json(['data' => [
+                    'configured' => true,
+                    'error' => $e->getMessage(),
+                ]]);
+            }
+        });
+
         Route::get('users', [UsersController::class, 'index']);
         Route::post('users', [UsersController::class, 'store']);
         Route::patch('users/bulk-update', [UsersController::class, 'bulkUpdate']);
