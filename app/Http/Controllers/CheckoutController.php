@@ -463,7 +463,6 @@ $slotTakenByPaidOrder = Order::query()
                 'vehicle_registration' => $vehicleRegistration,
                 'vehicle_make' => $data['vehicle_make'] ?? '',
                 'vehicle_model' => $data['vehicle_model'] ?? '',
-                'vehicle_year' => isset($data['vehicle_year']) && $data['vehicle_year'] ? (int) $data['vehicle_year'] : null,
                 'service_type' => $serviceType,
                 'tyre_brand' => $data['tyre_brand'],
                 'tyre_model' => $data['tyre_model'],
@@ -482,6 +481,13 @@ $slotTakenByPaidOrder = Order::query()
                     : null,
                 'notes' => "{$commentBlock}{$fittingAddressBlock}\nSubtotal: {$subtotal}\nPlatform Fee Enabled: ".($platformFeeEnabled ? '1' : '0')."\nPlatform Fee Amount: {$appliedPlatformFee}\nTPMS Charge Enabled: ".($tpmsChargeEnabled ? '1' : '0')."\nCustomer TPMS add-on: ".($includeTpms ? 'yes' : 'no')."\nTPMS Charge Amount: {$appliedTpmsCharge}\nDelivery Distance Miles: {$deliveryDistanceMiles}\nDelivery Charge: {$deliveryCharge}\nDelivery Out Of Range: ".($deliveryOutOfRange ? 'yes' : 'no')."\nTax Base: {$taxBase}\nVAT Enabled: ".($vatEnabled ? '1' : '0')."\nVAT Percentage: {$vatPercentage}\nVAT Amount: {$vatAmount}\nCurrency: {$currency}\nTotal: {$total}",
             ]);
+
+            // Store vehicle_year separately — column added via migration, gracefully skipped if not yet present
+            if (isset($data['vehicle_year']) && $data['vehicle_year']) {
+                try {
+                    $order->update(['vehicle_year' => (int) $data['vehicle_year']]);
+                } catch (\Throwable) {}
+            }
 
             DB::commit();
 
@@ -511,7 +517,11 @@ $slotTakenByPaidOrder = Order::query()
             ], 'Booking successful!', 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Checkout failed: '.$e->getMessage());
+            Log::error('Checkout failed: '.$e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             return $this->jsonError('Failed to process booking. Please try again.', null, 500);
         }
